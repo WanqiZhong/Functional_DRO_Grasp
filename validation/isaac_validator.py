@@ -29,7 +29,7 @@ class IsaacValidator:
         grasp_step=100,
         debug_interval=0.01
     ):
-        self.gym = gymapi.acquire_gym()
+        self.gym: gymapi.Gym = gymapi.acquire_gym()
         
         self.robot_name = robot_name
         self.joint_orders = joint_orders
@@ -66,6 +66,7 @@ class IsaacValidator:
         self.sim_params.physx.contact_offset = 0.01
         self.sim_params.physx.rest_offset = 0.0
 
+        # create sim (using PhysX)
         self.sim = self.gym.create_sim(self.gpu, self.gpu, gymapi.SIM_PHYSX, self.sim_params)
         self._rigid_body_states = self.gym.acquire_rigid_body_state_tensor(self.sim)
         self._dof_states = self.gym.acquire_dof_state_tensor(self.sim)
@@ -79,6 +80,13 @@ class IsaacValidator:
             self.camera_props.use_collision_geometry = True
             self.viewer = self.gym.create_viewer(self.sim, self.camera_props)
             self.gym.viewer_camera_look_at(self.viewer, None, gymapi.Vec3(1, 0, 0), gymapi.Vec3(0, 0, 0))
+            '''
+                viewer_camera_look_at(viewer, env, cam_pos, cam_pos)
+                viewer: viewer handle
+                env: env is the environment handle, if None, the viewer will be in global mode
+                cam_pos: the position of the camera 
+                cam_pos: the lookup target of the camera
+            '''
         else:
             self.has_viewer = False
 
@@ -88,9 +96,9 @@ class IsaacValidator:
         self.robot_asset_options.collapse_fixed_joints = True
 
         self.object_asset_options = gymapi.AssetOptions()
-        self.object_asset_options.override_com = True
-        self.object_asset_options.override_inertia = True
-        self.object_asset_options.density = 500
+        self.object_asset_options.override_com = True  # calculate center of mass (not using the one in URDF)
+        self.object_asset_options.override_inertia = True # calculate inertia (not using the one in URDF)
+        self.object_asset_options.density = 500 # density of the object
 
     def set_asset(self, robot_path, robot_file, object_path, object_file):
         self.robot_asset = self.gym.load_asset(self.sim, robot_path, robot_file, self.robot_asset_options)
@@ -104,15 +112,15 @@ class IsaacValidator:
         for env_idx in range(self.batch_size):
             env = self.gym.create_env(
                 self.sim,
-                gymapi.Vec3(-1, -1, -1),
-                gymapi.Vec3(1, 1, 1),
-                int(self.batch_size ** 0.5)
+                gymapi.Vec3(-1, -1, -1),     # lower bound of the env
+                gymapi.Vec3(1, 1, 1),        # upper bound of the env
+                int(self.batch_size ** 0.5)  # number of envs in x/y direction
             )
             self.envs.append(env)
 
             # draw world frame
             if self.has_viewer:
-                x_axis_dir = np.array([0, 0, 0, 1, 0, 0], dtype=np.float32)
+                x_axis_dir = np.array([0, 0, 0, 1, 0, 0], dtype=np.float32)  # start point (0, 0, 0), end point (1, 0, 0)
                 x_axis_color = np.array([1, 0, 0], dtype=np.float32)
                 self.gym.add_lines(self.viewer, env, 1, x_axis_dir, x_axis_color)
                 y_axis_dir = np.array([0, 0, 0, 0, 1, 0], dtype=np.float32)
@@ -123,15 +131,17 @@ class IsaacValidator:
                 self.gym.add_lines(self.viewer, env, 1, z_axis_dir, z_axis_color)
 
             # object actor setting
+            # add object to the environment
             object_handle = self.gym.create_actor(
                 env,
                 self.object_asset,
-                gymapi.Transform(),
+                gymapi.Transform(),   # initial pose of the object, default is in (0, 0, 0) without rotation
                 f'object_{env_idx}',
                 env_idx
             )
             self.object_handles.append(object_handle)
 
+            # set object properties
             object_shape_properties = self.gym.get_actor_rigid_shape_properties(env, object_handle)
             for i in range(len(object_shape_properties)):
                 object_shape_properties[i].friction = self.object_friction
@@ -165,6 +175,7 @@ class IsaacValidator:
         obj_property = self.gym.get_actor_rigid_body_properties(self.envs[0], self.object_handles[0])
         object_mass = [obj_property[i].mass for i in range(len(obj_property))]
         object_mass = torch.tensor(object_mass)
+        # 0.5 is the acceleration of force
         self.object_force = 0.5 * object_mass
 
         self.urdf2isaac_order = np.zeros(len(self.joint_orders), dtype=np.int32)
@@ -181,8 +192,10 @@ class IsaacValidator:
         _root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         root_state = gymtorch.wrap_tensor(_root_state)
         root_state[:] = torch.tensor([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], dtype=torch.float32)
+        # maybe position(0, 0, 0), quaternion(0, 0, 0, 1), linear velocity(0, 0, 0), angular velocity(0, 0, 0)
         self.gym.set_actor_root_state_tensor(self.sim, _root_state)
 
+        # the start and end of the q in paper
         outer_q, inner_q = controller(self.robot_name, q)
 
         for env_idx in range(len(self.envs)):
@@ -258,6 +271,8 @@ class IsaacValidator:
         # apply inverse object transform to robot to get new joint value
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         object_pose = gymtorch.wrap_tensor(self._rigid_body_states).clone()[::self.rigid_body_num, :7]  # batch_size, 7 (xyz + quat)
+        # there are batch_size * rigid_body_num rigid bodies in the tensor
+        # get the first rigid body in each batch -> (batch_size, 7)
         object_transform = np.eye(4)[np.newaxis].repeat(self.batch_size, axis=0)
         object_transform[:, :3, 3] = object_pose[:, :3]
         object_transform[:, :3, :3] = Rotation.from_quat(object_pose[:, 3:7]).as_matrix()
@@ -268,6 +283,7 @@ class IsaacValidator:
         robot_transform[:, :3, 3] = dof_states[:, :3]
         robot_transform[:, :3, :3] = Rotation.from_euler('XYZ', dof_states[:, 3:6]).as_matrix()
 
+        # transform robot from world space to object space
         robot_transform = np.linalg.inv(object_transform) @ robot_transform
         dof_states[:, :3] = torch.tensor(robot_transform[:, :3, 3])
         dof_states[:, 3:6] = torch.tensor(Rotation.from_matrix(robot_transform[:, :3, :3]).as_euler('XYZ'))

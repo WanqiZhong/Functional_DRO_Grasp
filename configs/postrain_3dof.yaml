@@ -1,0 +1,37 @@
+defaults:
+  - log.yaml
+  - model.yaml
+  - dataset: mix_retarget_dataset.yaml
+  - _self_
+
+name: 'postrain_3dof'
+
+seed: 42
+gpu:
+  - 0
+  - 1
+  # - 4
+  # - 5
+  # - 6
+  # - 7
+
+
+load_from_checkpoint: False
+log_every_n_steps: 5
+
+wandb:  # override log.yaml
+  project: 'DROGrasp-Postrain-3DoF'
+
+model:  # override model.yaml
+    encoder:
+        pretrain: null
+    language_dim: 64
+
+training:
+  max_epochs: 100
+
+  save_dir: '${output_dir}/state_dict'
+  save_every_n_epoch: 5
+
+  lr: 1e-4
+  temperature: 0.1

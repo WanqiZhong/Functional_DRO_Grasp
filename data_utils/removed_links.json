@@ -4,5 +4,6 @@
     "ezgripper": ["base_link"],
     "robotiq_3finger": [],
     "shadowhand": ["forearm", "wrist", "ffknuckle", "mfknuckle", "rfknuckle", "lfknuckle", "thbase"],
+    "retarget_shadowhand": ["forearm", "wrist", "ffknuckle", "mfknuckle", "rfknuckle", "lfknuckle", "thbase"],
     "leaphand": []
 }

@@ -22,6 +22,19 @@ class MLPKernel(nn.Module):
         v2 = self.mlp(torch.cat([x2, x1], dim=-1))
         return F.softplus((v1 + v2) / 2)
 
+class MLPKernelLarge(nn.Module):
+    def __init__(self, feature_dim):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.mlp = MLP(2 * feature_dim, [2*feature_dim, feature_dim, 100, 1])
+
+    def forward(self, x1, x2):
+        v1 = self.mlp(torch.cat([x1, x2], dim=-1))
+        v2 = self.mlp(torch.cat([x2, x1], dim=-1))
+        return F.softplus((v1 + v2) / 2)
+
+
+
 
 class MLP(nn.Sequential):
     """

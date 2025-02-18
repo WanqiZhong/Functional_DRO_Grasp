@@ -37,7 +37,7 @@ def main(cfg):
     )
 
     dataloader = create_dataloader(cfg.dataset)
-    encoder = create_encoder_network(cfg.model.emb_dim)
+    encoder = create_encoder_network(cfg.model.emb_dim, pretrain="pretrain_3robots.pth.origin")
     model = PretrainingModule(
         cfg=cfg.training,
         encoder=encoder

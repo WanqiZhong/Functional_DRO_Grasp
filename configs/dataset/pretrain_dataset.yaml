@@ -5,3 +5,4 @@ robot_names:
 
 batch_size: 32
 num_workers: 16
+fix_initial_q: true

@@ -13,10 +13,13 @@ import trimesh
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.hand_model import create_hand_model
+from DRO_Grasp.utils.hand_model import create_hand_model
 
 
-def worker(robot_name, object_name, batch_size, gpu):
+def worker(robot_name, object_name, dataset, batch_size, gpu, object_id=None):
+    """
+    Use issac main to filter the dataset through dynamic simulation.
+    """
     args = [
         'python',
         os.path.join(ROOT_DIR, 'validation/isaac_main.py'),
@@ -24,8 +27,13 @@ def worker(robot_name, object_name, batch_size, gpu):
         '--robot_name', robot_name,
         '--object_name', object_name,
         '--batch_size', str(batch_size),
-        '--gpu', gpu
+        '--gpu', gpu,
+        '--dataset', dataset
     ]
+
+    if dataset == 'oakink':
+        args.extend(['--object_id', object_id])
+
     # for arg in args:
     #     print(arg, end=' ')
     # print('\n')
@@ -39,8 +47,21 @@ def worker(robot_name, object_name, batch_size, gpu):
         cprint(ret.stderr.strip(), 'red')
 
 
-def filter_dataset(gpu_list):
-    dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset/cmap_dataset.pt')
+def filter_dataset(gpu_list, dataset):
+    ''' 
+        the content of info is shown in data/CMapDataset_filtered/README.md, which is:
+        shadowhand contactdb+rubber_duck 200
+        shadowhand contactdb+pyramid_medium 200
+        shadowhand contactdb+banana 200
+        shadowhand contactdb+cube_large 3
+    '''
+    if dataset == 'cmap':
+        dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset/cmap_dataset.pt')
+    elif dataset == 'oakink':
+        dataset_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_coacd.pt')
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
+    
     info = torch.load(dataset_path, map_location='cpu')['info']
     if 'cmap_func' in info:
         del info['cmap_func']
@@ -50,10 +71,13 @@ def filter_dataset(gpu_list):
     gpu_index = 0
     for robot_name in info.keys():
         for object_name in info[robot_name]['num_per_object'].keys():
-            batch_size = info[robot_name]['num_per_object'][object_name]
-            gpu = gpu_list[gpu_index % len(gpu_list)]
-            pool.apply_async(worker, args=(robot_name, object_name, batch_size, gpu))
-            gpu_index += 1
+            for object_id in info[robot_name]['num_per_object'][object_name].keys():
+                if object_id == 'all':
+                    continue
+                batch_size = info[robot_name]['num_per_object'][object_name][object_id]
+                gpu = gpu_list[gpu_index % len(gpu_list)]
+                pool.apply_async(worker, args=(robot_name, object_name, dataset, batch_size, gpu, object_id))
+                gpu_index += 1
 
     pool.close()
     pool.join()
@@ -127,16 +151,16 @@ def post_process(with_heatmap=False):
                     n_robot = robot_pc.shape[0]
                     n_object = object_pc.shape[0]
 
-                    robot_pc = robot_pc.unsqueeze(0).repeat(n_object, 1, 1)
-                    object_pc = object_pc.unsqueeze(0).repeat(n_robot, 1, 1).transpose(0, 1)
+                    robot_pc = robot_pc.unsqueeze(0).repeat(n_object, 1, 1) # (n_object, n_robot, 3)
+                    object_pc = object_pc.unsqueeze(0).repeat(n_robot, 1, 1).transpose(0, 1) # (n_object, n_robot, 3)
                     object_normal = object_normal.unsqueeze(0).repeat(n_robot, 1, 1).transpose(0, 1)
 
-                    object_hand_dist = (robot_pc - object_pc).norm(dim=2)
+                    object_hand_dist = (robot_pc - object_pc).norm(dim=2) # (n_object, n_robot)
                     object_hand_align = ((robot_pc - object_pc) * object_normal).sum(dim=2)
                     object_hand_align /= (object_hand_dist + 1e-5)
 
                     object_hand_align_dist = object_hand_dist * torch.exp(1 - object_hand_align)
-                    contact_dist = torch.sqrt(object_hand_align_dist.min(dim=1)[0])
+                    contact_dist = torch.sqrt(object_hand_align_dist.min(dim=1)[0]) # get min in n_robot -> (n_object,)
                     contact_value_current = 1 - 2 * (torch.sigmoid(10 * contact_dist) - 0.5)
                     heapmap = contact_value_current.unsqueeze(-1)
 
@@ -169,32 +193,49 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu_list',  # input format like '--gpu_list 0,1,2,3,4,5,6,7'
-                        default=['0', '1', '2', '3', '4', '5', '6', '7'],
+                        # default=['0', '1', '2', '3', '4', '5', '6', '7'],
+                        default=['0','2','6','7'],
                         type=lambda string: string.split(','))
     parser.add_argument('--print_info', action='store_true')
     parser.add_argument('--post_process', action='store_true')
     parser.add_argument('--with_heatmap', action='store_true')
+    parser.add_argument('--dataset', default='oakink', type=str)
     args = parser.parse_args()
 
     assert not (args.print_info and args.post_process)
     if args.print_info:
-        # dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset/cmap_dataset.pt')
-        dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset_filtered/cmap_dataset.pt')
+        if args.dataset == 'cmap':
+            # dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset/cmap_dataset.pt')
+            dataset_path = os.path.join(ROOT_DIR, f'data/CMapDataset_filtered/cmap_dataset.pt')
+        elif args.dataset == 'oakink':
+            dataset_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_coacd.pt')
+        else:
+            raise ValueError(f"Unknown dataset: {args.dataset}")
+        
         info = torch.load(dataset_path, map_location=torch.device('cpu'))['info']
         if 'cmap_func' in info:
             print(f"cmap_func: {info['cmap_func']}")
             del info['cmap_func']
 
         for robot_name in info.keys():
-            print(f"********************************")
-            print(f"robot_name: {info[robot_name]['robot_name']}")
-            print(f"num_total: {info[robot_name]['num_total']}")
-            print(f"num_upper_object: {info[robot_name]['num_upper_object']}")
-            print(f"num_per_object: {len(info[robot_name]['num_per_object'])}")
-            for object_name in sorted(info[robot_name]['num_per_object'].keys()):
-                print(f"    {object_name}: {info[robot_name]['num_per_object'][object_name]}")
-            print(f"********************************")
+            print("=" * 40)
+            print(f"Robot Name       : {info[robot_name]['robot_name']}")
+            print(f"Total Objects    : {info[robot_name]['num_total']}")
+            print(f"Max Per Category : {info[robot_name]['num_upper_object']}")
+            print(f"Categories Count : {len(info[robot_name]['num_per_object'])}")
+            print("-" * 40)
+            
+            for object_name, object_data in sorted(info[robot_name]['num_per_object'].items()):
+                print(f"[{object_name}]")
+                
+                if isinstance(object_data, dict):
+                    for object_id, count in sorted(object_data.items()):
+                        print(f"  - {object_id}: {count}")
+                else:
+                    print(f"  Total: {object_data}")
+            
+            print("=" * 40)
     elif args.post_process:
         post_process(args.with_heatmap)
     else:
-        filter_dataset(args.gpu_list)
+        filter_dataset(args.gpu_list, args.dataset)

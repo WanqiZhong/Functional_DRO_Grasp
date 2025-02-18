@@ -4,18 +4,16 @@ defaults:
   - dataset: pretrain_dataset.yaml
   - _self_
 
-name: 'pretrain_3robots'
+name: 'pretrain_3robots_not_fix_initial_q_100'
 
 seed: 42
 gpu:
   - 0
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  - 6
-  - 7
+  # - 3
+  # - 4
+  # - 5
+  # - 6
+  # - 7
 
 load_from_checkpoint: False
 log_every_n_steps: 5

@@ -7,13 +7,16 @@ import numpy as np
 import torch
 import trimesh
 import pytorch_kinematics as pk
+from manotorch.manolayer import ManoLayer, MANOOutput
+from manotorch.axislayer import AxisLayerFK
+from trimesh import Trimesh
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.func_utils import farthest_point_sampling
-from utils.mesh_utils import load_link_geometries
-from utils.rotation import *
+from DRO_Grasp.utils.func_utils import farthest_point_sampling
+from DRO_Grasp.utils.mesh_utils import load_link_geometries
+from DRO_Grasp.utils.rotation import *
 
 
 class HandModel:
@@ -30,6 +33,14 @@ class HandModel:
         self.urdf_path = urdf_path
         self.meshes_path = meshes_path
         self.device = device
+
+        if robot_name == 'mano':
+            self.mano_layer = ManoLayer(rot_mode="axisang",
+                                        center_idx=0,
+                                        mano_assets_root="assets/mano",
+                                        use_pca=False,
+                                        flat_hand_mean=True)
+            self.axisFK = AxisLayerFK(mano_assets_root="assets/mano")
 
         self.pk_chain = pk.build_chain_from_urdf(open(urdf_path).read()).to(dtype=torch.float32, device=device)
         self.dof = len(self.pk_chain.get_joint_parameter_names())
@@ -61,7 +72,37 @@ class HandModel:
             q = q_rot6d_to_q_euler(q)
         self.frame_status = self.pk_chain.forward_kinematics(q.to(self.device))
 
-    def get_transformed_links_pc(self, q=None, links_pc=None):
+    # def get_transformed_links_pc(self, q=None, links_pc=None):
+    #     """
+    #     Use robot link pc & q value to get point cloud.
+
+    #     :param q: (6 + DOF,), joint values (euler representation)
+    #     :param links_pc: {link_name: (N_link, 3)}, robot links pc dict, not None only for get_sampled_pc()
+    #     :return: point cloud: (N, 4), with link index
+    #     """
+    #     if q is None:
+    #         q = torch.zeros(self.dof, dtype=torch.float32, device=self.device)
+    #     self.update_status(q)
+    #     if links_pc is None:
+    #         links_pc = self.links_pc
+
+    #     all_pc_se3 = []
+    #     for link_index, (link_name, link_pc) in enumerate(links_pc.items()):
+    #         if not torch.is_tensor(link_pc):
+    #             link_pc = torch.tensor(link_pc, dtype=torch.float32, device=q.device)
+    #         n_link = link_pc.shape[0]
+    #         se3 = self.frame_status[link_name].get_matrix()[0].to(q.device)
+    #         homogeneous_tensor = torch.ones(n_link, 1, device=q.device)
+    #         link_pc_homogeneous = torch.cat([link_pc.to(q.device), homogeneous_tensor], dim=1)
+    #         link_pc_se3 = (link_pc_homogeneous @ se3.T)[:, :3]
+    #         index_tensor = torch.full([n_link, 1], float(link_index), device=q.device)
+    #         link_pc_se3_index = torch.cat([link_pc_se3, index_tensor], dim=1)
+    #         all_pc_se3.append(link_pc_se3_index)
+    #     all_pc_se3 = torch.cat(all_pc_se3, dim=0)
+
+    #     return all_pc_se3
+    
+    def get_transformed_links_pc(self, q=None, links_pc=None, only_palm=False):
         """
         Use robot link pc & q value to get point cloud.
 
@@ -79,6 +120,8 @@ class HandModel:
         for link_index, (link_name, link_pc) in enumerate(links_pc.items()):
             if not torch.is_tensor(link_pc):
                 link_pc = torch.tensor(link_pc, dtype=torch.float32, device=q.device)
+            if only_palm and link_index != 0:
+                continue
             n_link = link_pc.shape[0]
             se3 = self.frame_status[link_name].get_matrix()[0].to(q.device)
             homogeneous_tensor = torch.ones(n_link, 1, device=q.device)
@@ -90,7 +133,7 @@ class HandModel:
         all_pc_se3 = torch.cat(all_pc_se3, dim=0)
 
         return all_pc_se3
-
+    
     def get_sampled_pc(self, q=None, num_points=512):
         """
         :param q: (9 + DOF,), joint values (rot6d representation)
@@ -120,6 +163,7 @@ class HandModel:
         :return: initial q: (6 + DOF,), euler representation
         """
         if q is None:  # random sample root rotation and joint values
+            print("Randomly sample initial q.")
             q_initial = torch.zeros(self.dof, dtype=torch.float32, device=self.device)
 
             q_initial[3:6] = (torch.rand(3) * 2 - 1) * torch.pi
@@ -156,6 +200,20 @@ class HandModel:
             q_initial = q_rot6d_to_q_euler(q_initial)
 
         return q_initial
+    
+    def get_fixed_initial_q(self):
+        """ For training purposes only. """
+        q_initial = torch.zeros(self.dof, dtype=torch.float32, device=self.device)
+
+        q_initial[3:6] = torch.ones(3) * torch.pi / 30
+        q_initial[5] /= 2
+
+        lower_joint_limits, upper_joint_limits = self.pk_chain.get_joint_limits()
+        lower_joint_limits = torch.tensor(lower_joint_limits[6:], dtype=torch.float32)
+        upper_joint_limits = torch.tensor(upper_joint_limits[6:], dtype=torch.float32)
+        portion = 0.85
+        q_initial[6:] = lower_joint_limits * portion + upper_joint_limits * (1 - portion)
+        return q_initial   
 
     def get_trimesh_q(self, q):
         """ Return the hand trimesh object corresponding to the input joint value q. """
@@ -208,6 +266,66 @@ class HandModel:
         all_faces = np.vstack(faces)
 
         return trimesh.Trimesh(vertices=all_vertices, faces=all_faces)
+    
+    def get_mano_pc(self, q, translation, hand_pose, hand_shape):
+        """ 
+        Return the mano hand point cloud corresponding to the input joint value q.
+            :param q: (6 + DOF,), joint values (euler representation)
+            :param translation: torch.tensor, (3,), translation of the hand
+            :param hand_pose: torch.tensor, (1, 48), mano hand pose
+            :param hand_shape: torch.tensor, (1, 10), mano hand shape
+        """
+        assert self.robot_name == 'mano', f"Only support mano hand model, but got {self.robot_name}"
+
+        rpy = q[3:6].clone()
+        robot_joint_order = self.get_joint_orders()
+        joint_to_q = dict(zip(robot_joint_order, q))
+
+        composed_ee = torch.zeros((1, 16, 3))  
+        composed_ee[:, 0] = torch.zeros_like(rpy).unsqueeze(0)  # (1, 3)
+
+        composed_ee[:, 13] = torch.tensor([0, joint_to_q["j_thumb1y"], joint_to_q["j_thumb1x"]]).unsqueeze(0)  # thumb1
+        composed_ee[:, 14] = torch.tensor([0, 0, joint_to_q["j_thumb2"]]).unsqueeze(0)
+        composed_ee[:, 15] = torch.tensor([0, 0, joint_to_q["j_thumb3"]]).unsqueeze(0)
+
+        composed_ee[:, 1] = torch.tensor([0, joint_to_q["j_index1y"], joint_to_q["j_index1x"]]).unsqueeze(0)  # index1
+        composed_ee[:, 2] = torch.tensor([0, 0, joint_to_q["j_index2"]]).unsqueeze(0)
+        composed_ee[:, 3] = torch.tensor([0, 0, joint_to_q["j_index3"]]).unsqueeze(0)
+
+        composed_ee[:, 4] = torch.tensor([0, joint_to_q["j_middle1y"], joint_to_q["j_middle1x"]]).unsqueeze(0)  # middle1
+        composed_ee[:, 5] = torch.tensor([0, 0, joint_to_q["j_middle2"]]).unsqueeze(0)
+        composed_ee[:, 6] = torch.tensor([0, 0, joint_to_q["j_middle3"]]).unsqueeze(0)
+
+        composed_ee[:, 10] = torch.tensor([0, joint_to_q["j_ring1y"], joint_to_q["j_ring1x"]]).unsqueeze(0)  # ring1
+        composed_ee[:, 11] = torch.tensor([0, 0, joint_to_q["j_ring2"]]).unsqueeze(0)
+        composed_ee[:, 12] = torch.tensor([0, 0, joint_to_q["j_ring3"]]).unsqueeze(0)
+
+        composed_ee[:, 7] = torch.tensor([0, joint_to_q["j_pinky1y"], joint_to_q["j_pinky1x"]]).unsqueeze(0)  # pinky1
+        composed_ee[:, 8] = torch.tensor([0, 0, joint_to_q["j_pinky2"]]).unsqueeze(0)
+        composed_ee[:, 9] = torch.tensor([0, 0, joint_to_q["j_pinky3"]]).unsqueeze(0)
+
+        composed_aa = self.axisFK.compose_our(composed_ee).clone()  # (B=1, 16, 3)
+        composed_aa = composed_aa.reshape(1, -1)  # (1, 48)
+        composed_aa = torch.cat([hand_pose[:, :3], composed_aa[:, 3:]], dim=1)
+
+        mano_output: MANOOutput = self.mano_layer(composed_aa, hand_shape)
+        hand_verts = mano_output.verts.squeeze(0)   # (NV, 3)
+        hand_verts = hand_verts + translation[None, :]
+        
+        return self.get_mano_pc_from_verts(hand_verts)
+
+    def get_mano_pc_from_verts(self, verts: torch.Tensor):
+        """
+            Return the mano hand point cloud corresponding to the input vertices.
+            :param verts: torch.tensor, (NV, 3), mano hand vertices
+        """
+        robot_pc_target = farthest_point_sampling(verts, 512)
+        return robot_pc_target
+
+
+
+        
+
 
 
 def create_hand_model(

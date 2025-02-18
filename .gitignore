@@ -3,6 +3,7 @@
 logs/
 lightning_logs/
 
+assets/
 ckpt/
 data/
 output/
@@ -10,3 +11,8 @@ outputs/
 tmp/
 validate_output/
 vis_info/
+DRO_Grasp.egg-info/
+*.pkl
+*.png
+*.logs
+visualization/manopth/

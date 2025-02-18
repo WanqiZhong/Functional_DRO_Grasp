@@ -1,0 +1,346 @@
+import os
+import sys
+import json
+import math
+import hydra
+import random
+import trimesh
+import torch
+from torch.utils.data import Dataset, DataLoader
+from oikit.oi_shape import OakInkShape
+from tqdm import tqdm
+import glob
+import numpy as np
+from urdfpy import URDF
+from math import pi
+from manotorch.axislayer import AxisLayerFK
+from manotorch.manolayer import ManoLayer, MANOOutput
+import pickle as pk
+import open3d as o3d
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
+
+from utils.hand_model import create_hand_model
+from utils.func_utils import farthest_point_sampling
+
+class OakInkDataset(Dataset):
+    def __init__(
+        self,
+        batch_size: int,
+        robot_names: list = None,
+        is_train: bool = True,
+        debug_object_names: list = None,
+        num_points: int = 512,
+        object_pc_type: str = 'random',
+        mano_assets_root: str = "assets/mano",
+        load_from_cache: bool = False
+    ):
+        self.batch_size = batch_size
+        self.robot_names = robot_names 
+        assert self.robot_names == ['mano'], "OakInkDataset only supports mano"
+        self.is_train = is_train
+        self.num_points = num_points
+        self.object_pc_type = object_pc_type
+        self.mano_assets_root = mano_assets_root
+
+        if load_from_cache:
+            print("Loading OakInkShape from cache...")
+            assert os.path.exists(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset.pt')), "OakInkShape metadata not found"
+            with open(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset.pt'), 'rb') as f:
+                # assign to metadata.grasp_list
+                self.metadata = pk.load(f) 
+            print("OakInkShape metadata loaded")   
+            assert os.path.exists(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_all_object_pcs.pt')), "OakInkShape object pcs not found"
+            with open(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_all_object_pcs.pt'), 'rb') as f:
+                # assign to object_pcs
+                self.object_pcs = pk.load(f)
+            print("OakInkShape object pcs loaded")         
+
+        else:
+            print("Loading OakInkShape metadata...")
+            if self.is_train:
+                self.metadata = OakInkShape(data_split='train', category='teapot', intent_mode='use', mano_assets_root=self.mano_assets_root)
+            else:
+                self.metadata = OakInkShape(data_split='val', mano_assets_root=self.mano_assets_root)
+
+            robot = URDF.load("/data/zwq/code/mano-urdf/urdf/mano.urdf")
+            axisFK = AxisLayerFK(mano_assets_root=self.mano_assets_root)
+            mano_layer = ManoLayer(center_idx=0, mano_assets_root=self.mano_assets_root, flat_hand_mean=True)
+
+            # for grasp_item in tqdm(self.metadata.grasp_list, desc="Load robot pcs"):
+            #     grasp_item['robot_pc_target'], _ = farthest_point_sampling(torch.tensor(grasp_item['verts']), num_points=self.num_points)
+            #     grasp_item['robot_pc_initial'], _ = farthest_point_sampling(self._generate_initial_hand_pc(grasp_item['hand_pose'], grasp_item['hand_shape'], robot, axisFK, mano_layer).squeeze(0), num_points=self.num_points)
+
+            with open(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset_metadata.pt'), 'wb') as f:
+                torch.save(self.metadata, f)
+                print("OakInkShape metadata loaded")
+
+            self.object_pcs = {}
+            for grasp_item in tqdm(self.metadata.grasp_list):
+                if grasp_item['obj_id'] not in self.object_pcs:
+                    obj_mesh_path = list(
+                    glob.glob(os.path.join(ROOT_DIR, f'data/data_urdf/object/oakink/{grasp_item["cate_id"]}/{grasp_item["obj_id"]}.obj')) +
+                    glob.glob(os.path.join(ROOT_DIR, f'data/data_urdf/object/oakink/{grasp_item["cate_id"]}/{grasp_item["obj_id"]}.ply')))
+                    assert len(obj_mesh_path) == 1
+                    obj_path = obj_mesh_path[0]
+
+                    if obj_path.endswith('.ply'):
+                        mesh = o3d.io.read_triangle_mesh(obj_path)
+                        vertices = np.asarray(mesh.vertices)
+                        bbox_center = (vertices.min(0) + vertices.max(0)) / 2
+                        mesh.vertices = o3d.utility.Vector3dVector(vertices - bbox_center)
+                        pcd = mesh.sample_points_uniformly(number_of_points=self.num_points)
+                        object_pc = np.asarray(pcd.points)
+                        
+                    else:  
+                        obj_trimesh = trimesh.load(obj_path, process=False, force='mesh', skip_materials=True)
+                        bbox_center = (obj_trimesh.vertices.min(0) + obj_trimesh.vertices.max(0)) / 2
+                        obj_trimesh.vertices -= bbox_center
+                        object_pc, _ = obj_trimesh.sample(self.num_points, return_index=True)
+
+                    self.object_pcs[grasp_item['obj_id']] = torch.tensor(object_pc, dtype=torch.float32)   
+
+                
+            with open(os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_all_object_pcs.pt'), 'wb') as f:
+                torch.save(self.object_pcs, f)
+                print("OakInkShape object pcs loaded")
+ 
+            
+            print("OakInkShape metadata loaded")
+
+        # # self.dofs = []
+        # # for robot_name in self.robot_names:
+        # #     self.hands[robot_name] = create_hand_model(robot_name, torch.device('cpu'))
+        # #     self.dofs.append(math.sqrt(self.hands[robot_name].dof))
+
+        # split_json_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/split_train_validate_objects.json')
+        # dataset_split = json.load(open(split_json_path))
+        # self.object_names = dataset_split['train'] if is_train else dataset_split['validate']
+        # if debug_object_names is not None:
+        #     print("!!! Using debug objects !!!")
+        #     self.object_names = debug_object_names
+
+        # dataset_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset.pt')
+        # metadata = torch.load(dataset_path)['metadata']
+        # self.metadata = [m for m in metadata if m[4] in self.object_names and m[5] in self.robot_names]
+        # if not self.is_train:
+        #     self.combination = []
+        #     for robot_name in self.robot_names:
+        #         for object_name in self.object_names:
+        #             self.combination.append((robot_name, object_name))
+        #     self.combination = sorted(self.combination)
+        # # print(len(self.metadata))
+        # # print(len(self.combination))
+
+        # self.object_pcs = {}
+        # extensions = ['obj', 'ply', 'stl', 'off']  
+        # if self.object_pc_type != 'fixed':
+        #     for data in self.metadata:
+        #         name = data[4].split('+')
+        #         mesh_dir = os.path.join(ROOT_DIR, f'data/data_urdf/object/{name[0]}/{name[1]}/{name[1]}')
+        #         for ext in extensions:
+        #             mesh_path = os.path.join(mesh_dir, f'{data[6]}.{ext}')
+        #             if os.path.exists(mesh_path):
+        #                 break
+        #         mesh = trimesh.load(mesh_path, process=False, force="mesh", skip_materials=True)
+        #         bbox_center = (mesh.vertices.min(0) + mesh.vertices.max(0)) / 2
+        #         mesh.vertices = mesh.vertices - bbox_center
+        #         object_pc, _ = mesh.sample(65536, return_index=True)
+        #         self.object_pcs[data[6]] = torch.tensor(object_pc, dtype=torch.float32)
+        # else:
+        #     print("!!! Using fixed object pcs !!!")
+
+    def _generate_initial_hand_pc(self, hand_pose, hand_shape, robot, axisFK, mano_layer):
+
+        composed_ee = torch.zeros((1, 16, 3))
+        joint_limits = {}
+        for joint in robot.joints:
+            if "virtual" in joint.name:
+                continue
+            if joint.limit is not None:
+                joint_limits[joint.name] = [joint.limit.lower, joint.limit.upper]
+            else:
+                joint_limits[joint.name] = [-pi, pi]
+
+        canonical_q = {}
+        for joint_name, limits in joint_limits.items():
+            lower, upper = limits
+            coefficient = np.random.uniform(0.65, 0.85) 
+            joint_value = upper * (1 - coefficient) + lower * coefficient 
+            canonical_q[joint_name] = joint_value
+
+        # for joint_name, limits in canonical_q.items():
+        #     print(f"{joint_name}: {limits}")
+
+        composed_ee[:, 13] = torch.tensor([0, canonical_q['j_thumb1z'], 0]).unsqueeze(0)
+        composed_ee[:, 14] = torch.tensor([0, 0, canonical_q['j_thumb2']]).unsqueeze(0)  
+        composed_ee[:, 15] = torch.tensor([0, 0, canonical_q['j_thumb3']]).unsqueeze(0)  
+
+        composed_ee[:, 1] = torch.tensor([0, 0, canonical_q['j_index1x']]).unsqueeze(0)  
+        composed_ee[:, 2] = torch.tensor([0, 0, canonical_q['j_index2']]).unsqueeze(0)   
+        composed_ee[:, 3] = torch.tensor([0, 0, canonical_q['j_index3']]).unsqueeze(0) 
+
+        composed_ee[:, 4] = torch.tensor([0, 0, canonical_q['j_middle1x']]).unsqueeze(0) 
+        composed_ee[:, 5] = torch.tensor([0, 0, canonical_q['j_middle2']]).unsqueeze(0)  
+        composed_ee[:, 6] = torch.tensor([0, 0, canonical_q['j_middle3']]).unsqueeze(0)  
+
+        composed_ee[:, 10] = torch.tensor([0, 0, canonical_q['j_ring1x']]).unsqueeze(0)  
+        composed_ee[:, 11] = torch.tensor([0, 0, canonical_q['j_ring2']]).unsqueeze(0) 
+        composed_ee[:, 12] = torch.tensor([0, 0, canonical_q['j_ring3']]).unsqueeze(0)   
+
+        composed_ee[:, 7] = torch.tensor([0, 0, canonical_q['j_pinky1x']]).unsqueeze(0)  
+        composed_ee[:, 8] = torch.tensor([0, 0, canonical_q['j_pinky2']]).unsqueeze(0) 
+        composed_ee[:, 9] = torch.tensor([0, 0, canonical_q['j_pinky3']]).unsqueeze(0) 
+
+        composed_aa = axisFK.compose(composed_ee).clone()  # (B=1, 16, 3)
+        composed_aa = composed_aa.reshape(1, -1)  # (1, 16x3)
+        composed_aa = np.concatenate([hand_pose[:3].reshape(1, 3), composed_aa[..., 3:]], axis=1)
+
+        mano_output: MANOOutput = mano_layer(torch.tensor(composed_aa), torch.tensor(hand_shape).unsqueeze(0))
+
+        return mano_output.verts
+
+
+    def __getitem__(self, index):
+        """
+        Train: sample a batch of data
+        Validate: get (robot, object) from index, sample a batch of data
+        """
+        if self.is_train:
+
+            robot_name_batch = []
+            object_name_batch = []
+            robot_pc_target_batch = []
+            robot_pc_initial_batch = []
+            object_pc_batch = []
+            dro_gt_batch = []
+
+            for idx in range(self.batch_size):
+                
+                robot_name = self.robot_names[0]
+                robot_name_batch.append(robot_name)
+
+                grasp_item = random.choice(self.metadata.grasp_list)
+                object_name_batch.append(grasp_item['obj_id'])
+
+                robot_pc_target = grasp_item['robot_pc_target']
+                robot_pc_initial = grasp_item['robot_pc_initial']
+
+                if self.object_pc_type == 'random':
+                    indices = torch.randperm(65536)[:self.num_points]
+                    object_pc = self.object_pcs[grasp_item['obj_id']][indices]
+                    object_pc += torch.randn(object_pc.shape) * 0.002
+                else:  # 'partial', remove 50% points
+                    indices = torch.randperm(65536)[:self.num_points * 2]
+                    object_pc = self.object_pcs[grasp_item['obj_id']][indices]
+                    direction = torch.randn(3)
+                    direction = direction / torch.norm(direction)
+                    proj = object_pc @ direction
+                    _, indices = torch.sort(proj)
+                    indices = indices[self.num_points:]
+                    object_pc = object_pc[indices]
+
+                object_pc_batch.append(object_pc)
+                dro = torch.cdist(robot_pc_target, object_pc, p=2)
+                dro_gt_batch.append(dro)
+                robot_pc_initial_batch.append(robot_pc_initial)
+                robot_pc_target_batch.append(robot_pc_target)
+
+            robot_pc_initial_batch = torch.stack(robot_pc_initial_batch)
+            robot_pc_target_batch = torch.stack(robot_pc_target_batch)
+            object_pc_batch = torch.stack(object_pc_batch)
+            dro_gt_batch = torch.stack(dro_gt_batch)
+
+            B, N = self.batch_size, self.num_points
+            assert robot_pc_initial_batch.shape == (B, N, 3),\
+                f"Expected: {(B, N, 3)}, Actual: {robot_pc_initial_batch.shape}"
+            assert robot_pc_target_batch.shape == (B, N, 3),\
+                f"Expected: {(B, N, 3)}, Actual: {robot_pc_target_batch.shape}"
+            assert object_pc_batch.shape == (B, N, 3),\
+                f"Expected: {(B, N, 3)}, Actual: {object_pc_batch.shape}"
+            assert dro_gt_batch.shape == (B, N, N),\
+                f"Expected: {(B, N, N)}, Actual: {dro_gt_batch.shape}"
+
+            return {
+                'robot_name': robot_name_batch,  # list(len = B): str
+                'object_name': object_name_batch,  # list(len = B): 
+                'robot_links_pc': None,
+                'robot_pc_initial': robot_pc_initial_batch,
+                'robot_pc_target': robot_pc_target_batch, 
+                'object_pc': object_pc_batch,
+                'dro_gt': dro_gt_batch,
+                'initial_q': None,
+                'target_q': None
+            }
+        
+        else:  # validate
+            robot_name = self.robot_names[0]
+            object_name = self.metadata.grasp_list[index]['obj_id']
+
+            robot_pc_batch = torch.zeros([self.batch_size, self.num_points, 3], dtype=torch.float32)
+            object_pc_batch = torch.zeros([self.batch_size, self.num_points, 3], dtype=torch.float32)
+
+            for batch_idx in range(self.batch_size):
+
+                robot_pc = grasp_item['robot_pc_initial']
+
+                if self.object_pc_type == 'partial':
+                    indices = torch.randperm(65536)[:self.num_points * 2]
+                    object_pc = self.object_pcs[grasp_item['obj_id']][indices]
+                    direction = torch.randn(3)
+                    direction = direction / torch.norm(direction)
+                    proj = object_pc @ direction
+                    _, indices = torch.sort(proj)
+                    indices = indices[self.num_points:]
+                    object_pc = object_pc[indices]
+                else:
+                    object_pc = self.object_pcs[grasp_item['obj_id']]
+
+                robot_pc_batch[batch_idx] = robot_pc
+                object_pc_batch[batch_idx] = object_pc
+
+            assert robot_pc_batch.shape == (B, N, 3), \
+                f"Expected: {(B, N, 3)}, Actual: {robot_pc_batch.shape}"
+            assert object_pc_batch.shape == (B, N, 3), \
+                f"Expected: {(B, N, 3)}, Actual: {object_pc_batch.shape}"
+
+            return {
+                'robot_name': robot_name,  # str
+                'object_name': object_name,  # str
+                'initial_q': None,
+                'robot_pc': robot_pc_batch,
+                'object_pc': object_pc_batch
+            }
+
+    def __len__(self):
+        if self.is_train:
+            return math.ceil(len(self.metadata.grasp_list) / self.batch_size)
+        else:
+            return len(self.metadata.grasp_list)
+        # if self.is_train:
+        #     return math.ceil(len(self.metadata) / self.batch_size)
+        # else:
+        #     return len(self.combination)
+
+
+def custom_collate_fn(batch):
+    return batch[0]
+
+
+def create_dataloader(cfg, is_train):
+    dataset = OakInkDataset(
+        batch_size=cfg.batch_size,
+        robot_names=cfg.robot_names,
+        is_train=is_train,
+        debug_object_names=cfg.debug_object_names,
+        object_pc_type=cfg.object_pc_type
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=1,
+        collate_fn=custom_collate_fn,
+        num_workers=cfg.num_workers,
+        shuffle=is_train
+    )
+    return dataloader

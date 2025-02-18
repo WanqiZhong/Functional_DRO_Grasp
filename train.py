@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(ROOT_DIR)
 
-from data_utils.CMapDataset import create_dataloader
+from data_utils.CombineDataset import create_dataloader
 from model.network import create_network
 from model.module import TrainingModule
 

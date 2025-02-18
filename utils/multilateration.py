@@ -29,6 +29,9 @@ def estimate_p(
     PtP_minus_r2 = (PtP - R**2)[:, None, None]
 
     # These are ripped straight from the paper, with weighting passed through.
+    '''
+        #TODO: understand the following code
+    '''
     a = (W * (PtP_minus_r2 * P)).mean(dim=0)
     B = (W * (-2 * PPt - PtP_minus_r2 * NI)).mean(dim=0)
     c = (W * P).mean(dim=0)

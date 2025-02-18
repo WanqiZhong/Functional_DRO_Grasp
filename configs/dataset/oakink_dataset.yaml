@@ -1,0 +1,9 @@
+robot_names:
+  - 'mano'
+
+debug_object_names: null  # use part of the dataset, for debug only
+dataset_name: 'oakink'
+
+batch_size: 8  # 1 batch_size ≈ 4 GB GPU memory during training
+num_workers: 16
+object_pc_type: 'random'  # 'fixed', 'random', 'partial'

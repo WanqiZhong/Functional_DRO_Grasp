@@ -62,13 +62,14 @@ def validate_depth(hand, object_name, q_list_validate, threshold=0.005, exact=Tr
     return result_list, depth_list
 
 
-def validate_isaac(robot_name, object_name, q_batch, gpu: int = 0):
+def validate_isaac(robot_name, object_name, q_batch, dataset_name, gpu: int = 0):
     """
     Wrap function for subprocess call (isaac_main.py) to avoid Isaac Gym GPU memory leak problem.
 
     :param robot_name: str
     :param object_name: str
     :param q_batch: torch.Tensor, joint values to validate
+    :param dataset_name: str, dataset name
     :param gpu: int
     :return: (list<bool>, list<float>), success list & info list
     """
@@ -84,6 +85,7 @@ def validate_isaac(robot_name, object_name, q_batch, gpu: int = 0):
         '--object_name', object_name,
         '--batch_size', str(batch_size),
         '--q_file', q_file_path,
+        '--dataset_name', dataset_name,
         '--gpu', str(gpu),
         # '--use_gui'
     ]

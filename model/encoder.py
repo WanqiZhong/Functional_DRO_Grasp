@@ -1,7 +1,23 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import sys
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
 
+
+def create_encoder_network(emb_dim, pretrain=None, device=torch.device('cpu')) -> nn.Module:
+    encoder = Encoder(emb_dim=emb_dim)
+    if pretrain is not None:
+        print(f"******** Load embedding network pretrain from <{pretrain}> ********")
+        encoder.load_state_dict(
+            torch.load(
+                os.path.join(ROOT_DIR, f"ckpt/pretrain/{pretrain}"),
+                map_location=device
+            )
+        )
+    return encoder
 
 def knn(x, k):
     inner = -2 * torch.matmul(x.transpose(2, 1).contiguous(), x)

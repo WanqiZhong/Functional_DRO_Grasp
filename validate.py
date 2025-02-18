@@ -10,7 +10,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(ROOT_DIR)
 
 from model.network import create_network
-from data_utils.CMapDataset import create_dataloader
+from data_utils.CombineDataset import create_dataloader
 from utils.multilateration import multilateration
 from utils.se3_transform import compute_link_pose
 from utils.optimization import *
@@ -18,8 +18,11 @@ from utils.hand_model import create_hand_model
 from validation.validate_utils import validate_isaac
 
 
-@hydra.main(version_base="1.2", config_path="configs", config_name="validate")
+@hydra.main(version_base="1.2", config_path="configs", config_name="validate_origin")
 def main(cfg):
+    print("******************************** [Config] ********************************")
+    print("dataset_name:", cfg.dataset.dataset_name)
+    
     device = torch.device(f'cuda:{cfg.gpu}')
     batch_size = cfg.dataset.batch_size
     print(f"Device: {device}")
@@ -123,7 +126,7 @@ def main(cfg):
                 for k, v in transform.items():
                     transform_batch[k] = v if k not in transform_batch else torch.cat((transform_batch[k], v), dim=0)
 
-            success, isaac_q = validate_isaac(robot_name, object_name, predict_q_batch, gpu=cfg.gpu)
+            success, isaac_q = validate_isaac(robot_name, object_name, predict_q_batch, gpu=cfg.gpu, dataset_name=cfg.dataset.dataset_name)
             succ_num = success.sum().item() if success is not None else -1
             success_q = predict_q_batch[success]
             all_success_q.append(success_q)

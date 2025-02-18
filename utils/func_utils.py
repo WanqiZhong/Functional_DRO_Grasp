@@ -6,7 +6,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
 
-def calculate_depth(robot_pc, object_names):
+def calculate_depth(robot_pc, object_names, object_ids=None):
     """
     Calculate the average penetration depth of predicted pc into the object.
 
@@ -16,12 +16,22 @@ def calculate_depth(robot_pc, object_names):
     """
     object_pc_list = []
     normals_list = []
-    for object_name in object_names:
-        name = object_name.split('+')
-        object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}.pt')
-        object_pc_normals = torch.load(object_path).to(robot_pc.device)
-        object_pc_list.append(object_pc_normals[:, :3])
-        normals_list.append(object_pc_normals[:, 3:])
+
+    if object_ids is not None:
+        for idx, object_name in enumerate(object_ids):
+            name = object_names[idx].split('+')
+            object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}/{object_name}.pt')
+            object_pc_normals = torch.load(object_path).to(robot_pc.device)
+            object_pc_list.append(object_pc_normals[:, :3])
+            normals_list.append(object_pc_normals[:, 3:])
+    else:
+        for object_name in object_names:
+            name = object_name.split('+')
+            object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}.pt')
+            object_pc_normals = torch.load(object_path).to(robot_pc.device)
+            object_pc_list.append(object_pc_normals[:, :3])
+            normals_list.append(object_pc_normals[:, 3:])
+
     object_pc = torch.stack(object_pc_list, dim=0)
     normals = torch.stack(normals_list, dim=0)
 

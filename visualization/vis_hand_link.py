@@ -18,6 +18,7 @@ robot_name = args.robot_name
 
 hand = create_hand_model(robot_name)
 meshes = hand.get_trimesh_q(hand.get_canonical_q())['parts']
+print(hand.urdf_path)
 
 server = viser.ViserServer(host='127.0.0.1', port=8080)
 

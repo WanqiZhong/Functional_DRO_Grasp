@@ -1,0 +1,18 @@
+robot_names:
+  # - 'barrett'
+  # - 'allegro'
+  # - 'shadowhand'
+  - 'retarget_shadowhand'
+
+debug_object_names: null  # use part of the dataset, for debug only
+dataset_name: 'combine'
+
+batch_size: 16
+num_workers: 16
+object_pc_type: 'random'  # 'fixed', 'random', 'partial'
+
+ratio:
+  # barrett: 3
+  # allegro: 4
+  # shadowhand: 5
+  retarget_shadowhand: 8

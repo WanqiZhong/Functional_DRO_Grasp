@@ -1,3 +1,4 @@
+# Description: Dataset for pretraining model from open hand to closed hand to get a better encoder.
 import os
 import sys
 import time
@@ -8,11 +9,12 @@ from torch.utils.data import Dataset, DataLoader
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.hand_model import create_hand_model
+from utils.hand_model import create_hand_model, HandModel
+
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, robot_names: list = None):
+    def __init__(self, fix_initial_q: bool = False, robot_names: list = None):
         self.robot_names = robot_names if robot_names is not None \
             else ['barrett', 'allegro', 'shadowhand']
 
@@ -21,6 +23,9 @@ class PretrainDataset(Dataset):
         self.hands = {}
         self.dofs = []
         self.dataset = {}
+        self.fix_initial_q = fix_initial_q
+        print(f"fix_initial_q: {self.fix_initial_q}")
+
         for robot_name in self.robot_names:
             self.hands[robot_name] = create_hand_model(robot_name, torch.device('cpu'))
             self.dofs.append(len(self.hands[robot_name].pk_chain.get_joint_parameter_names()))
@@ -36,17 +41,22 @@ class PretrainDataset(Dataset):
     def __getitem__(self, index):
         robot_name = random.choices(self.robot_names, weights=self.dofs, k=1)[0]
 
-        hand = self.hands[robot_name]
+        hand:HandModel = self.hands[robot_name]
         dataset = self.dataset[robot_name]
         target_q, _, _ = random.choice(dataset)
 
         robot_pc_1 = hand.get_transformed_links_pc(target_q)[:, :3]
-        initial_q = hand.get_initial_q(target_q)
-        robot_pc_2 = hand.get_transformed_links_pc(initial_q)[:, :3]
+
+        fix_initial_q = hand.get_fixed_initial_q()
+        nofix_initial_q = hand.get_initial_q(target_q)
+
+        robot_pc_2 = hand.get_transformed_links_pc(fix_initial_q)[:, :3]
+        robot_pc_nofix = hand.get_transformed_links_pc(nofix_initial_q)[:, :3]
 
         return {
             'robot_pc_1': robot_pc_1,
             'robot_pc_2': robot_pc_2,
+            'robot_pc_nofix': robot_pc_nofix
         }
 
     def __len__(self):
@@ -54,7 +64,7 @@ class PretrainDataset(Dataset):
 
 
 def create_dataloader(cfg):
-    dataset = PretrainDataset(cfg.robot_names)
+    dataset = PretrainDataset(fix_initial_q=cfg.fix_initial_q, robot_names=cfg.robot_names)
     dataloader = DataLoader(
         dataset,
         batch_size=cfg.batch_size,

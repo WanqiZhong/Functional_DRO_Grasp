@@ -88,7 +88,12 @@ def controller(robot_name, q_para):
         for joint_name, dot in joint_dots.items():
             idx = joint_orders.index(joint_name)
             if robot_name == 'robotiq_3finger':  # open -> upper, close -> lower
-                outer_q[idx] += 0.25 * ((outer_q[idx] - lower_q[idx]) if dot <= 0 else (outer_q[idx] - upper_q[idx]))
+                '''
+                    note the parentheses, which is equivalent to:
+                    dot <= 0: open, outer_q[idx] += 0.25 * (outer_q[idx] - lower_q[idx])
+                    dot > 0: close, outer_q[idx] += 0.25 * (outer_q[idx] - upper_q[idx])
+                '''
+                outer_q[idx] += 0.25 * ((outer_q[idx] - lower_q[idx]) if dot <= 0 else (outer_q[idx] - upper_q[idx])) 
                 inner_q[idx] += 0.15 * ((inner_q[idx] - upper_q[idx]) if dot <= 0 else (inner_q[idx] - lower_q[idx]))
             else:  # open -> lower, close -> upper
                 outer_q[idx] += 0.25 * ((lower_q[idx] - outer_q[idx]) if dot >= 0 else (upper_q[idx] - outer_q[idx]))
@@ -101,5 +106,5 @@ def controller(robot_name, q_para):
 
     if q_para.ndim == 2:  # batch
         return outer_q_batch.to(q_para.device), inner_q_batch.to(q_para.device)
-    else:
+    else: # decide by the input q_para, if it is a batch, return batch, else return single (batch_size=1)
         return outer_q_batch[0].to(q_para.device), inner_q_batch[0].to(q_para.device)

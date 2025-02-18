@@ -15,7 +15,7 @@ gpu:
   - 4
   - 5
   - 6
-  - 7
+  # - 7
 
 load_from_checkpoint: False
 log_every_n_steps: 5
@@ -39,3 +39,6 @@ training:
 
   loss_depth: True
   loss_depth_weight: 1
+
+  cross_hand: False
+  cross_object: False

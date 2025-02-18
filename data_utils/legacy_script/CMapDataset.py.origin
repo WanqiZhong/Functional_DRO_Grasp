@@ -7,11 +7,13 @@ import random
 import trimesh
 import torch
 from torch.utils.data import Dataset, DataLoader
+import open3d as o3d
+from utils.hand_model import create_hand_model, HandModel
+from tqdm import tqdm
+import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
-
-from utils.hand_model import create_hand_model
 
 
 class CMapDataset(Dataset):
@@ -30,6 +32,8 @@ class CMapDataset(Dataset):
         self.is_train = is_train
         self.num_points = num_points
         self.object_pc_type = object_pc_type
+
+        print("Loading cmap dataset...")
 
         self.hands = {}
         self.dofs = []
@@ -58,11 +62,14 @@ class CMapDataset(Dataset):
 
         self.object_pcs = {}
         if self.object_pc_type != 'fixed':
-            for object_name in self.object_names:
+            for object_name in tqdm(self.object_names):
                 name = object_name.split('+')
                 mesh_path = os.path.join(ROOT_DIR, f'data/data_urdf/object/{name[0]}/{name[1]}/{name[1]}.stl')
-                mesh = trimesh.load_mesh(mesh_path)
-                object_pc, _ = mesh.sample(65536, return_index=True)
+                # mesh = trimesh.load_mesh(mesh_path)
+                mesh = o3d.io.read_triangle_mesh(mesh_path)
+                pcd = mesh.sample_points_uniformly(65536)
+                object_pc = np.asarray(pcd.points)
+                # object_pc, _ = mesh.sample(65536, return_index=True)
                 self.object_pcs[object_name] = torch.tensor(object_pc, dtype=torch.float32)
         else:
             print("!!! Using fixed object pcs !!!")
@@ -85,7 +92,7 @@ class CMapDataset(Dataset):
             for idx in range(self.batch_size):
                 robot_name = random.choice(self.robot_names)
                 robot_name_batch.append(robot_name)
-                hand = self.hands[robot_name]
+                hand: HandModel = self.hands[robot_name]
                 metadata_robot = [(m[0], m[1]) for m in self.metadata if m[2] == robot_name]
 
                 target_q, object_name = random.choice(metadata_robot)

@@ -65,7 +65,7 @@ def se3_transform_point_cloud(P, Transform):
     return P_transformed[..., :3]
 
 
-def compute_link_pose(robot_links_pc, predict_pcs, is_train=True):
+def compute_link_pose(robot_links_pc, predict_pcs, is_train=True, only_palm=False):
     """
     Calculate link poses of the predicted pc.
 
@@ -89,6 +89,9 @@ def compute_link_pose(robot_links_pc, predict_pcs, is_train=True):
             for link_index, (link_name, link_pc) in enumerate(links_pc.items()):
                 predict_pc_link = predict_pc[global_index: global_index + link_pc.shape[-2], :3]
                 global_index += link_pc.shape[0]
+
+                if only_palm and link_index != 0:
+                    continue
 
                 link_se3 = compute_se3_transform(link_pc.unsqueeze(0), predict_pc_link.unsqueeze(0))[0]  # (4, 4)
                 link_transformed_pc = se3_transform_point_cloud(link_pc, link_se3)  # (N_link, 3)
