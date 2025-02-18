@@ -649,6 +649,7 @@ def custom_collate_fn(batch):
 
 def create_dataloader(cfg, is_train, fix_sample=False, fixed_initial_q=False):
 
+    print(f"Creating dataloader: complex_language_type={cfg.complex_language_type}")
     dataset = CombineDataset(
         batch_size=cfg.batch_size,
         robot_names=cfg.robot_names,
@@ -657,7 +658,8 @@ def create_dataloader(cfg, is_train, fix_sample=False, fixed_initial_q=False):
         object_pc_type=cfg.object_pc_type,
         data_ratio=cfg.ratio,
         fix_sample=fix_sample,
-        fixed_initial_q=fixed_initial_q
+        fixed_initial_q=fixed_initial_q,
+        complex_language_type=cfg.complex_language_type,
     )
     dataloader = DataLoader(
         dataset,

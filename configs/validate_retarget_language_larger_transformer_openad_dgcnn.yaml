@@ -12,7 +12,7 @@ dataset:  # override cmap_dataset.yaml
     batch_size: 1  # total grasps of (robot, object) combination
 
 split_batch_size: 1  # limited by GPU memory
-gpu: 6
+gpu: 0
 # name: 'model_language_not_fix_initial'
 # name: 'model_language_nofix_initial_larger_transformer_openad'
 # name: 'model_language_nofix_initial_larger_transformer_openad_openai_256_dgcnn'

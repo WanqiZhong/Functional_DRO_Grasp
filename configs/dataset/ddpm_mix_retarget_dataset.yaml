@@ -6,6 +6,7 @@ robot_names:
 
 debug_object_names: null  # use part of the dataset, for debug only
 dataset_name: 'combine'
+complex_language_type: 'openai_256'
 
 batch_size: 64
 num_workers: 16
