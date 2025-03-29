@@ -47,7 +47,8 @@ class CombineDataset(Dataset):
         use_validatedata_in_train_mode = False,
         complex_language_type: str = 'openai_256',  # clip_768, openai_256, clip_512
         provide_pc: bool = True,
-        use_dro: bool = True
+        use_dro: bool = True,
+        use_valid_data: bool = False
     ):
         self.batch_size = batch_size
         self.robot_names = robot_names if robot_names is not None else ['barrett', 'allegro', 'shadowhand']
@@ -62,7 +63,7 @@ class CombineDataset(Dataset):
         self.use_validatedata_in_train_mode = use_validatedata_in_train_mode
         self.provide_pc = provide_pc
         self.use_dro = use_dro
-
+        self.use_valid_data = use_valid_data
         # Load Hand (Both CMapDataset and OakInkDataset)
         self.hands = {}
         self.dofs = []
@@ -83,9 +84,9 @@ class CombineDataset(Dataset):
 
         for robot_name in self.robot_names:
             hand = self.hands[robot_name]
-            robot_initial_q = hand.get_fixed_initial_q()
+            robot_initial_q = hand.get_initial_q()
             self.robot_fix_initial_q[robot_name] = robot_initial_q
-            robot_initial_q_pc =  hand.get_transformed_links_pc(robot_initial_q, only_palm=self.only_palm)[:, :3]
+            robot_initial_q_pc = hand.get_transformed_links_pc(robot_initial_q, only_palm=self.only_palm)[:, :3]
             self.robot_fix_initial_q_pc[robot_name] = robot_initial_q_pc
 
 
@@ -168,7 +169,11 @@ class CombineDataset(Dataset):
 
             print("Loading OakInkDataset...")
 
-            oakink_dataset_path = os.path.join(ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand.pt')
+            if self.use_valid_data:
+                oakink_dataset_path = os.path.join(ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_dro.pt')
+            else:
+                oakink_dataset_path = os.path.join(ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand.pt')
+
             oakink_metadata = torch.load(oakink_dataset_path)['metadata']
             oakink_metadata_filtered = [m for m in oakink_metadata if (m[6] in self.robot_names or m[6] == 'shadowhand')]
             
@@ -407,7 +412,7 @@ class CombineDataset(Dataset):
                 #     robot_pc_initial_batch.append(robot_pc_initial)
                 # else:
 
-                initial_q = self.robot_fix_initial_q[robot_name]
+                initial_q = hand.get_initial_q()
                 initial_q_batch.append(initial_q)
 
                 nofix_initial_q = hand.get_initial_q(target_q)
@@ -416,7 +421,7 @@ class CombineDataset(Dataset):
                 wrist_target_q = torch.cat([target_q[:6], initial_q[6:]])
                 wrist_target_q_batch.append(wrist_target_q)
 
-                robot_pc_initial = self.robot_fix_initial_q_pc[robot_name]
+                robot_pc_initial = hand.get_transformed_links_pc(initial_q)[:, :3]
                 robot_pc_initial_batch.append(robot_pc_initial)
                 
                 if self.use_dro:
@@ -660,6 +665,7 @@ def create_dataloader(cfg, is_train, fix_sample=False, fixed_initial_q=False):
         fix_sample=fix_sample,
         fixed_initial_q=fixed_initial_q,
         complex_language_type=cfg.complex_language_type,
+        use_valid_data=cfg.use_valid_data
     )
     dataloader = DataLoader(
         dataset,

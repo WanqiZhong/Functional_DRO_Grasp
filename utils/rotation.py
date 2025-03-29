@@ -47,6 +47,13 @@ def euler_to_quaternion(euler):
     quaternion = Rotation.from_euler('XYZ', euler.cpu().numpy()).as_quat()
     return torch.tensor(quaternion, dtype=torch.float32, device=device)
 
+def quaternion_to_euler(quaternion):
+    device = quaternion.device
+    euler = Rotation.from_quat(quaternion.cpu().numpy()).as_euler('XYZ')
+    return torch.tensor(euler, dtype=torch.float32, device=device)
+
+
+
 def normalize(v):
     return v / torch.norm(v, dim=-1, keepdim=True)
 

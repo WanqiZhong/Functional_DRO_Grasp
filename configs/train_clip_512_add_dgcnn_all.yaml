@@ -1,0 +1,49 @@
+defaults:
+  - log.yaml
+  - language_model.yaml
+  - dataset: mix_retarget_dataset_all.yaml
+  - _self_
+
+# name: 'model_language_nofix_initial_larger_transformer_clip_512_dgcnn_new_spilt_short_sentence_all'
+name: 'model_clip_512_add_dgcnn_valid_all'
+dataset:
+  complex_language_type: 'clip_512'
+
+seed: 42
+gpu:
+  # - 0
+  # - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+
+load_from_checkpoint: True
+log_every_n_steps: 5
+
+training:
+  max_epochs: 200
+
+  save_dir: '${output_dir}/state_dict'
+  save_every_n_epoch: 5
+
+  lr: 1e-4
+
+  loss_kl: False
+  loss_kl_weight: 0.01
+
+  loss_r: True
+  loss_r_weight: 1
+  loss_r_weighted: False
+  loss_se3: True
+  loss_se3_weight: 0.01
+
+  loss_depth: True
+  loss_depth_weight: 1
+
+  cross_hand: False
+  cross_object: False
+  only_palm: False
+  two_stage: False

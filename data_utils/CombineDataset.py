@@ -38,7 +38,7 @@ class CombineDataset(Dataset):
         debug_object_names: list = None,
         num_points: int = 512,
         object_pc_type: str = 'random',
-        use_fixed_initial_q: bool = True
+        use_fixed_initial_q: bool = False
     ):
         self.batch_size = batch_size
         self.robot_names = robot_names if robot_names is not None else ['barrett', 'allegro', 'shadowhand']
@@ -271,8 +271,8 @@ class CombineDataset(Dataset):
             object_pc_batch = torch.zeros([self.batch_size, self.num_points, 3], dtype=torch.float32)
 
             for batch_idx in range(self.batch_size):
-                # initial_q = hand.get_initial_q()
-                initial_q = hand.get_fixed_initial_q()
+                initial_q = hand.get_initial_q()
+                # initial_q = hand.get_fixed_initial_q()
                 robot_pc = hand.get_transformed_links_pc(initial_q)[:, :3]
 
                 if self.object_pc_type == 'partial':
@@ -351,13 +351,14 @@ def custom_collate_fn(batch):
     return batch[0]
 
 
-def create_dataloader(cfg, is_train):
+def create_dataloader(cfg, is_train, use_fixed_initial_q=False):
     dataset = CombineDataset(
         batch_size=cfg.batch_size,
         robot_names=cfg.robot_names,
         is_train=is_train,
         debug_object_names=cfg.debug_object_names,
-        object_pc_type=cfg.object_pc_type
+        object_pc_type=cfg.object_pc_type,
+        use_fixed_initial_q=use_fixed_initial_q
     )
     dataloader = DataLoader(
         dataset,

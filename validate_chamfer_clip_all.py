@@ -9,8 +9,7 @@ from utils.hand_model import create_hand_model
 from utils.multilateration import multilateration
 from utils.se3_transform import compute_link_pose
 from utils.optimization import *
-from data_utils.CombineRetargetDataset import create_dataloader
-from model.network import create_network_larger_transformer_openai, create_network_larger_transformer_openai_dgcnn
+from model.network import create_network_larger_transformer_clip_add_dgcnn_acc
 import hydra
 from tqdm import tqdm
 
@@ -31,7 +30,7 @@ def _get_object_pc(object_name, object_id, robot_name):
     object_pc = torch.load(object_path)[:, :3]
     return object_pc
 
-@hydra.main(version_base="1.2", config_path="configs", config_name="validate_retarget_language_larger_transformer_openad_dgcnn")
+@hydra.main(version_base="1.2", config_path="configs", config_name="validate_retarget_language_larger_transformer_clip_512_dgcnn_add_all")
 def main(cfg):
     print("******************************** [Config] ********************************")    
     device = torch.device(f'cuda:{cfg.gpu}' if torch.cuda.is_available() else 'cpu')
@@ -47,26 +46,15 @@ def main(cfg):
         print(f"************************ Validating epoch {validate_epoch} ************************", file=f)
 
     # 加载网络模型
-    network = create_network_larger_transformer_openai_dgcnn(cfg.model, mode='validate').to(device)
-    network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device))
+    network = create_network_larger_transformer_clip_add_dgcnn_acc(cfg.model, mode='validate').to(device)
+    network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device), strict=False)
     network.eval()
 
-    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-16_09-58-23_oakink_rotmat_all_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-17_16-50-39/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-13_16-25-26_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-14_10-32-59/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-13_16-25-26_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-14_10-37-30/res_diffuser_10516.pkl"
-
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-46_oakink_rotmat_custom_robot_pn2_object_openad_pn2/eval/final_validate_data/2025-02-08_23-59-57/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-59_oakink_ee_custom_robot_pn2_object_pn2/eval/final_validate_data/2025-02-10_17-41-54/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-46_oakink_rotmat_custom_robot_pn2_object_openad_pn2/eval/final_validate_data/2025-02-10_16-43-27/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-46_oakink_rotmat_custom_robot_pn2_object_openad_pn2/eval/final_validate_data/2025-02-10_16-43-27/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-52_oakink_rotmat_custom_robot_pn2_object_pn2/eval/final_validate_data/2025-02-10_16-43-35/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-03_12-39-59_oakink_ee_custom_robot_pn2_object_pn2/eval/final_validate_data/2025-02-10_17-00-09/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-19_00-37-49_robot_rotmat_openad_oakink/eval/final_validate_data/2025-01-20_18-15-45/res_diffuser_100.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-08_18-07-23_oakink_all_dof/eval/final_validate_data/2025-01-10_02-03-02/res_diffuser_1000.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-15_04-21-46_robot_rotmat_oakink/eval/final/2025-01-18_20-40-45/res_diffuser_3000.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-15_04-21-46_robot_rotmat_oakink/eval/final_validate_data/2025-01-18_23-25-25/res_diffuser_3000.pkl"
+    # our
+    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-17_21-34-30_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-19_16-36-29/res_diffuser_100_old.pkl"
 
     results = load_results(result_path)['results']
+    print(f"Loading results from: {result_path}")
     print(f"Total samples: {len(results)}")
 
     chamfer_list = []
@@ -75,9 +63,7 @@ def main(cfg):
 
 
     for idx, data in enumerate(tqdm(results)):
-        # 创建手部模型
 
-        # 初始化手部姿态
         initial_q = hand.get_fixed_initial_q()
         if "all" not in result_path:
             initial_q = torch.cat([data['ddpm_qpos'][0].float().to(device), initial_q[6:]])
@@ -87,26 +73,22 @@ def main(cfg):
 
         robot_pc_initial = hand.get_transformed_links_pc(initial_q)[..., :3].unsqueeze(0).to(device)
 
-        # 获取物体点云
         object_pc = _get_object_pc(
             data['object_name'][0], 
             data['object_id'][0], 
             data['robot_name'][0]
         ).to(device).unsqueeze(0)
 
-        # 首先从 complex_language_embedding_openai_256 中获取语言嵌入，如果不存在则使用 complex_openai_embedding
         language_emb = data.get('complex_language_embedding_openai_256', data.get('complex_openai_embedding')).to(device) if data.get('complex_language_embedding_openai_256') is not None else data.get('complex_openai_embedding').to(device)
 
-        # 网络推理
         with torch.no_grad():
             dro = network(
                 robot_pc_initial,
                 object_pc,
-                language_emb=data['complex_language_embedding_openai_256'].to(device)
+                language_emb=data['complex_language_embedding_clip_512'].to(device)
                 # language_emb=data['complex_openai_embedding'].to(device)
             )['dro'].detach()
 
-        # 后处理与优化
         mlat_pc = multilateration(dro, object_pc)
         transform, _ = compute_link_pose(hand.links_pc, mlat_pc, is_train=False)
         optim_transform = process_transform(hand.pk_chain, transform)
@@ -114,26 +96,27 @@ def main(cfg):
         layer = create_problem(hand.pk_chain, optim_transform.keys())
         predict_q = optimization(hand.pk_chain, layer, initial_q, optim_transform)
 
-        # 将计算得到的 predict_q 保存到当前样本的字典中
         data['predict_q'] = predict_q.cpu()
 
-        # 计算 Chamfer 距离
         pred_pts = hand.get_transformed_links_pc(predict_q)[..., :3].unsqueeze(0).to(device)
         gt_q = data['target_q'][0].unsqueeze(0).to(device)
         gt_pts = hand.get_transformed_links_pc(gt_q)[..., :3].unsqueeze(0).to(device)
-        d1, d2, _, _ = chamfer_dist(x=pred_pts, y=gt_pts)
+
+        try:
+            d1, d2, _, _ = chamfer_dist(x=pred_pts, y=gt_pts)
+        except:
+            d1, d2, _, _ = chamfer_dist()(x=pred_pts, y=gt_pts)
+
         chamfer_value = (d1.sum() + d2.sum()).item()
         chamfer_list.append(chamfer_value)
-
         data['chamfer_value'] = chamfer_value
-
 
         print(f"Processed sample {idx+1}/{len(results)}, Chamfer distance: {chamfer_value}")
 
     average_chamfer = sum(chamfer_list) / len(chamfer_list) if chamfer_list else float('nan')
     print(f"Average Chamfer Distance over {len(results)} samples: {average_chamfer}")
 
-    new_result_path = os.path.join(ROOT_DIR, f'results_with_predict_q_{validate_epoch}.pkl')
+    new_result_path = os.path.join(os.path.dirname(result_path), f"res_diffuser_dro_predict_q.pkl")
     with open(new_result_path, 'wb') as f:
         pickle.dump({'results': results}, f)
     print(f"Updated results with predict_q saved to: {new_result_path}")

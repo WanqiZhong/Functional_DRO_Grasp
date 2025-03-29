@@ -45,6 +45,37 @@ def visualize_point_clouds(point_clouds, labels=None, colors=None, title="Point 
     ax.legend()
     plt.show()
 
+class WeightedL1Loss(nn.Module):
+    def __init__(self, links_pc):
+        super(WeightedL1Loss, self).__init__()
+        self.weights = self._calculate_weights(links_pc)
+        self.links_pc = links_pc
+    
+    def _calculate_weights(self, links_pc):
+        # Create a weight tensor
+        total_points = sum(link_pc.shape[0] for link_pc in links_pc.values())
+        # print("Total points: ", total_points)
+        weights = torch.ones(total_points, device=next(iter(links_pc.values())).device)
+        
+        global_index = 0
+        for link_name, link_pc in links_pc.items():
+            num_points = link_pc.shape[0]
+            weights[global_index:global_index + num_points] = 1.0 / num_points
+            global_index += num_points
+            
+        return weights
+    
+    def forward(self, pred, target):
+        # Calculate absolute difference
+        diff = torch.abs(pred - target)
+        
+        # Apply weights
+        weighted_diff = diff * self.weights.unsqueeze(-1)
+        
+        # Return mean of weighted differences
+        return weighted_diff.sum() / len(self.links_pc) 
+
+
 class TrainingModule(pl.LightningModule):
     def __init__(self, cfg, network, epoch_idx):
         super().__init__()
@@ -60,31 +91,13 @@ class TrainingModule(pl.LightningModule):
         if self.global_rank == 0:
             print(*args, **kwargs)
 
-    def get_loss_weights(self):
-        epoch = self.epoch_idx
-        if epoch < 50:
-            loss_r_weight = 1.0
-            loss_se3_weight = 0.0
-            loss_depth_weight = 0.0
-        elif 50 <= epoch < 100:
-            loss_r_weight = 1.0
-            loss_se3_weight = 0.1 * (epoch - 50) / 10  
-            loss_depth_weight = 0.0
-        else:
-            loss_r_weight = 1.0
-            loss_se3_weight = 0.01  
-            loss_depth_weight = 1.0 * (epoch - 100) / 10  
-            loss_depth_weight = min(loss_depth_weight, 1.0)  
-
-        return loss_r_weight, loss_se3_weight, loss_depth_weight
-
     def training_step(self, batch, batch_idx, visualize=False):
         robot_names = batch['robot_name']  
         mano_mask = [robot_name == 'mano' for robot_name in robot_names]
         mano_mask = torch.tensor(mano_mask)
         cmap_mask = [robot_name != 'mano' for robot_name in robot_names]
         cmap_mask = torch.tensor(cmap_mask)
-        retarget_mask = [robot_name == 'retarget_shadowhand' for robot_name in robot_names]
+        retarget_mask = ['retarget' in robot_name for robot_name in robot_names]
         retarget_mask = torch.tensor(retarget_mask)
 
         intent = batch['intent'] if 'intent' in batch else None
@@ -173,7 +186,10 @@ class TrainingModule(pl.LightningModule):
             loss += loss_kl
 
         if self.cfg.loss_r:
-            loss_r = nn.L1Loss()(dro, dro_gt)
+            if self.cfg.loss_r_weighted:
+                loss_r = WeightedL1Loss(robot_links_pc[0])(dro, dro_gt)
+            else:
+                loss_r = nn.L1Loss()(dro, dro_gt)
             loss_r = loss_r * self.cfg.loss_r_weight
             self.log('loss_r', loss_r, prog_bar=True)
             loss += loss_r
@@ -352,30 +368,12 @@ class PretrainingModule(pl.LightningModule):
     def training_step(self, batch, batch_idx, visualize=False):
         robot_pc_1 = batch['robot_pc_1']
         robot_pc_2 = batch['robot_pc_2']
-        robot_pc_nofix = batch['robot_pc_nofix']
 
         robot_pc_1 = robot_pc_1 - robot_pc_1.mean(dim=1, keepdims=True)
         robot_pc_2 = robot_pc_2 - robot_pc_2.mean(dim=1, keepdims=True)
-        robot_pc_nofix = robot_pc_nofix - robot_pc_nofix.mean(dim=1, keepdims=True)
-
-        # visualize_point_clouds
-
-        if visualize:
-
-            point_clouds = [robot_pc_1[0], robot_pc_2[0], robot_pc_nofix[0]]
-            labels = ["Target Robot Point", "Initial Robot Point", "Initial Robot Point (No Fix)"]
-            colors = ['r', 'g']
-
-            visualize_point_clouds(
-                point_clouds=point_clouds,
-                labels=labels,
-                colors=colors,
-                title="Robot Point Clouds"
-            )
 
         phi_1 = self.encoder(robot_pc_1)  # (B, N, 3) -> (B, N, D)
         phi_2 = self.encoder(robot_pc_2)  # (B, N, 3) -> (B, N, D)
-        phi_nofix = self.encoder(robot_pc_nofix) 
 
         weights = dist2weight(robot_pc_1, func=lambda x: torch.tanh(10 * x))
         loss, similarity = infonce_loss(
@@ -383,18 +381,19 @@ class PretrainingModule(pl.LightningModule):
         )
         mean_order_error = mean_order(similarity)
 
-        loss_nofix, similarity_nofix = infonce_loss(
-            phi_1, phi_nofix, weights=weights, temperature=self.temperature
-        )
-        mean_order_error_nofix = mean_order(similarity_nofix)
+        # loss_nofix, similarity_nofix = infonce_loss(
+        #     phi_1, phi_nofix, weights=weights, temperature=self.temperature
+        # )
+        # mean_order_error_nofix = mean_order(similarity_nofix)
 
         self.log("mean_order", mean_order_error)
         self.log("loss", loss, prog_bar=True)
 
-        self.log("mean_order_nofix", mean_order_error_nofix)
-        self.log("loss_nofix", loss_nofix, prog_bar=True)
+        # self.log("mean_order_nofix", mean_order_error_nofix)
+        # self.log("loss_nofix", loss_nofix, prog_bar=True)
 
-        return loss + loss_nofix
+        # return loss + loss_nofix
+        return loss
 
     def on_train_epoch_end(self):
         self.epoch_idx += 1

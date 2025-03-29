@@ -87,7 +87,7 @@ else:
 print("Load from ", dataset_path)
 dataset = torch.load(dataset_path, map_location=torch.device('cpu'))
 metadata = dataset['metadata']
-mano_compatibility = dataset['version']['metadata'] in ['1.3.0', '1.2.0', '1.2.0_COACD', '1.1.0']
+mano_compatibility = dataset['version']['metadata'] in ['1.3.0', '1.2.0', '1.2.0_COACD', '1.1.0', '2.0.0']
 print("Dataset version: ", dataset['version']['metadata'])
 assert 'mano' not in robot_names or mano_compatibility, "if only mano is visualized, the dataset must be in mano format"
 print(f"Mano compatibility: {mano_compatibility}")

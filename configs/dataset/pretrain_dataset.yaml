@@ -1,8 +1,7 @@
 robot_names:
-  - 'barrett'
+  - 'leaphand'
   - 'allegro'
   - 'shadowhand'
 
-batch_size: 32
+batch_size: 64
 num_workers: 16
-fix_initial_q: true

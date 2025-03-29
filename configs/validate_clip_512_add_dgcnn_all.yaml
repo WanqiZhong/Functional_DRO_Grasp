@@ -1,0 +1,30 @@
+defaults:
+    - language_model.yaml
+    - dataset: mix_retarget_dataset.yaml
+    - _self_
+
+model:  # override model.yaml
+    latent_dim: 256
+    encoder:
+        pretrain: null
+
+dataset:  # override cmap_dataset.yaml
+    batch_size: 1  # total grasps of (robot, object) combination
+    complex_language_type: 'clip_512'
+
+split_batch_size: 1  # limited by GPU memory
+gpu: 0
+# name: 'model_language_nofix_initial_larger_transformer_clip_512_dgcnn_new_spilt_short_sentence_all'
+name: 'model_clip_512_add_dgcnn_valid_all'
+
+validate_epochs:
+#    - 40
+#    - 30
+#    - 20
+#    - 10
+#    - 50
+#    - 60
+#    - 70
+   - 85
+#    - 145
+#    - 100

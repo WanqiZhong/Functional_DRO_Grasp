@@ -19,6 +19,21 @@ def create_encoder_network(emb_dim, pretrain=None, device=torch.device('cpu')) -
         )
     return encoder
 
+def create_encoder_network_acc(emb_dim, pretrain=None, device=torch.device('cpu')) -> nn.Module:
+    encoder = DGCNNAcc(
+        input_channels=3,
+        emb_dims=emb_dim,
+    )
+    if pretrain is not None:
+        print(f"******** Load embedding network pretrain from <{pretrain}> ********")
+        encoder.load_state_dict(
+            torch.load(
+                os.path.join(ROOT_DIR, f"ckpt/pretrain/{pretrain}"),
+                map_location=device
+            )
+        )
+    return encoder
+
 def knn(x, k):
     inner = -2 * torch.matmul(x.transpose(2, 1).contiguous(), x)
     xx = torch.sum(x ** 2, dim=1, keepdim=True)
@@ -117,6 +132,146 @@ class Encoder(nn.Module):
         x = self.conv6(x).view(B, -1, N)  # (B, 512, N)
 
         return x.permute(0, 2, 1)  # (B, D, N) -> (B, N, D)
+
+def knn_acc(x, k):
+    # x: (B, C, N)
+    inner = -2 * torch.matmul(x.transpose(2, 1), x)
+    xx = torch.sum(x ** 2, dim=1, keepdim=True)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]  # (B, N, k)
+    return idx
+
+def gather_feature(x, idx):
+    """
+    Gathers features for each point according to idx.
+    Args:
+      x: (B, C, N)
+      idx: (B, N, k)
+    Returns:
+      gathered: (B, C, N, k)
+    """
+    B, C, N = x.shape
+    k = idx.shape[-1]
+    idx_expanded = idx.unsqueeze(1).expand(-1, C, -1, -1)  # (B, C, N, k)
+    x_expanded = x.unsqueeze(-1).expand(-1, -1, N, k)        # (B, C, N, k)
+    gathered = torch.gather(x_expanded, 2, idx_expanded)      # (B, C, N, k)
+    return gathered
+
+class DGCNNAcc(nn.Module):
+    def __init__(self, input_channels=3, k=20, emb_dims=512, P=20):
+        """
+        Args:
+          input_channels: number of input channels (e.g., 3 for XYZ)
+          k: number of nearest neighbors for the first layer
+          emb_dims: output embedding dimensions
+          P: progressive enlargement step for neighbor pooling
+        """
+        super(DGCNNAcc, self).__init__()
+        self.k = k
+        self.P = P  # enlargement step
+
+        # Layer 1: from input_channels to 64
+        self.conv1a = nn.Sequential(
+            nn.Conv1d(input_channels, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 64),
+            nn.LeakyReLU(0.2)
+        )
+        self.conv1b = nn.Sequential(
+            nn.Conv1d(input_channels, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 64),
+            nn.LeakyReLU(0.2)
+        )
+
+        # Layer 2: from 64 to 64
+        self.conv2a = nn.Sequential(
+            nn.Conv1d(64, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 64),
+            nn.LeakyReLU(0.2)
+        )
+        self.conv2b = nn.Sequential(
+            nn.Conv1d(64, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 64),
+            nn.LeakyReLU(0.2)
+        )
+
+        # Layer 3: from 64 to 128
+        self.conv3a = nn.Sequential(
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 128),
+            nn.LeakyReLU(0.2)
+        )
+        self.conv3b = nn.Sequential(
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.GroupNorm(8, 128),
+            nn.LeakyReLU(0.2)
+        )
+
+        # Layer 4: from 128 to 256
+        self.conv4a = nn.Sequential(
+            nn.Conv1d(128, 256, kernel_size=1, bias=False),
+            nn.GroupNorm(16, 256),
+            nn.LeakyReLU(0.2)
+        )
+        self.conv4b = nn.Sequential(
+            nn.Conv1d(128, 256, kernel_size=1, bias=False),
+            nn.GroupNorm(16, 256),
+            nn.LeakyReLU(0.2)
+        )
+
+        # Final embedding layer (aggregates concatenated features)
+        self.conv5 = nn.Sequential(
+            nn.Conv1d(512, emb_dims * 2, kernel_size=1, bias=False),
+            nn.GroupNorm(16, emb_dims * 2),
+            nn.LeakyReLU(0.2),
+            nn.Conv1d(emb_dims * 2, emb_dims, kernel_size=1, bias=False),
+            nn.GroupNorm(16, emb_dims),
+            nn.LeakyReLU(0.2)
+        )
+
+    def forward(self, x):
+        x = x.permute(0, 2, 1) # (B, N, C) -> (B, C, N)
+        # x: (B, input_channels, N)
+        B, C, N = x.shape
+        # Compute a shared neighbor pool.
+        # For 4 layers, we need a pool of size: k + 3*P
+        pool_size = self.k + 3 * self.P
+        idx_pool = knn_acc(x, k=pool_size)  # (B, N, pool_size)
+
+        # For each layer, use a progressively larger subset of neighbors:
+        idx1 = idx_pool[:, :, :self.k]                # layer 1: k neighbors
+        idx2 = idx_pool[:, :, :self.k + self.P]         # layer 2: k + P neighbors
+        idx3 = idx_pool[:, :, :self.k + 2 * self.P]       # layer 3: k + 2P neighbors
+        idx4 = idx_pool                                # layer 4: full pool (k + 3P)
+
+        # Define a local helper to apply the "shuffled" graph conv layer.
+        def point_conv_layer(x_in, conv_a, conv_b, idx):
+            # Apply two pointwise convolutions (MLP branches)
+            f_a = conv_a(x_in)  # (B, C_out, N)
+            f_b = conv_b(x_in)  # (B, C_out, N)
+            # Gather neighbor features from f_a using precomputed indices.
+            # Resulting shape: (B, C_out, N, k_subset)
+            neighbor_feat = gather_feature(f_a, idx)
+            # Aggregate neighbors with max pooling.
+            aggregated = torch.max(neighbor_feat, dim=-1)[0]  # (B, C_out, N)
+            # Combine with the center branch.
+            out = aggregated + f_b
+            return out
+
+        # Layer 1
+        x1 = point_conv_layer(x, self.conv1a, self.conv1b, idx1)       # (B, 64, N)
+        # Layer 2
+        x2 = point_conv_layer(x1, self.conv2a, self.conv2b, idx2)          # (B, 64, N)
+        # Layer 3
+        x3 = point_conv_layer(x2, self.conv3a, self.conv3b, idx3)          # (B, 128, N)
+        # Layer 4
+        x4 = point_conv_layer(x3, self.conv4a, self.conv4b, idx4)          # (B, 256, N)
+
+        # Concatenate features from all layers along the channel dimension.
+        x_cat = torch.cat((x1, x2, x3, x4), dim=1)  # (B, 64+64+128+256 = 512, N)
+        x_out = self.conv5(x_cat)  # (B, emb_dims, N)
+
+        return x_out.permute(0, 2, 1) # (B, emb_dims, N) -> (B, N, emb_dims)
+
 
 
 class CvaeEncoder(nn.Module):

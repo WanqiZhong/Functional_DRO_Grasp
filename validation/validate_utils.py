@@ -9,7 +9,7 @@ import trimesh
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.controller import controller
+from DRO_Grasp.utils.controller import controller
 
 
 def validate_depth(hand, object_name, q_list_validate, threshold=0.005, exact=True):
@@ -62,7 +62,7 @@ def validate_depth(hand, object_name, q_list_validate, threshold=0.005, exact=Tr
     return result_list, depth_list
 
 
-def validate_isaac(robot_name, object_name, q_batch, dataset_name, gpu: int = 0):
+def validate_isaac(robot_name, object_name, q_batch, dataset_name, gpu: int = 0, object_id=None):
     """
     Wrap function for subprocess call (isaac_main.py) to avoid Isaac Gym GPU memory leak problem.
 
@@ -89,6 +89,8 @@ def validate_isaac(robot_name, object_name, q_batch, dataset_name, gpu: int = 0)
         '--gpu', str(gpu),
         # '--use_gui'
     ]
+    if object_id is not None:
+        args.extend(['--object_id', object_id])
     ret = subprocess.run(args, capture_output=True, text=True)
     try:
         ret_file_path = os.path.join(ROOT_DIR, f'tmp/isaac_main_ret_{gpu}.pt')
@@ -102,4 +104,61 @@ def validate_isaac(robot_name, object_name, q_batch, dataset_name, gpu: int = 0)
         cprint(ret.stdout.strip(), 'blue')
         cprint(ret.stderr.strip(), 'red')
         exit()
+    return success, q_isaac
+
+
+def validate_isaac_multi(robot_name, object_names, q_batch, dataset_name, gpu: int = 0, object_ids=None):
+    """
+    Wrap function for subprocess call (isaac_main.py) to avoid Isaac Gym GPU memory leak problem.
+    Modified to support batch processing of multiple objects.
+
+    :param robot_name: str, a single robot name
+    :param object_names: list[str], list of object names
+    :param q_batch: torch.Tensor, joint values to validate, shape [batch_size, DOF]
+    :param dataset_name: str, dataset name
+    :param gpu: int
+    :param object_ids: list[str] or None, list of object IDs (can be None for some datasets)
+    :return: (list<bool>, list<float>), success list & info list
+    """
+    os.makedirs(os.path.join(ROOT_DIR, 'tmp'), exist_ok=True)
+    q_file_path = str(os.path.join(ROOT_DIR, f'tmp/q_list_validate_{gpu}.pt'))
+    object_file_path = str(os.path.join(ROOT_DIR, f'tmp/object_list_validate_{gpu}.pt'))
+    
+    # Save q_batch and object data to temporary files
+    torch.save(q_batch, q_file_path)
+    object_data = {
+        'object_names': object_names,
+        'object_ids': object_ids
+    }
+    torch.save(object_data, object_file_path)
+    
+    batch_size = q_batch.shape[0]
+    args = [
+        'python',
+        os.path.join(ROOT_DIR, 'validation/isaac_main_multi.py'),
+        '--mode', 'batch_validation',
+        '--robot_name', robot_name,
+        '--batch_size', str(batch_size),
+        '--q_file', q_file_path,
+        '--object_file', object_file_path,
+        '--dataset_name', dataset_name,
+        '--gpu', str(gpu),
+        # '--use_gui'
+    ]
+    
+    ret = subprocess.run(args, capture_output=True, text=True)
+    try:
+        ret_file_path = os.path.join(ROOT_DIR, f'tmp/isaac_main_ret_{gpu}.pt')
+        save_data = torch.load(ret_file_path)
+        success = save_data['success']
+        q_isaac = save_data['q_isaac']
+        os.remove(q_file_path)
+        os.remove(object_file_path)
+        os.remove(ret_file_path)
+    except FileNotFoundError as e:
+        cprint(f"Caught a FileNotFoundError: {e}", 'yellow')
+        cprint(ret.stdout.strip(), 'blue')
+        cprint(ret.stderr.strip(), 'red')
+        exit()
+    
     return success, q_isaac

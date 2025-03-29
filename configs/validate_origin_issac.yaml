@@ -1,0 +1,17 @@
+defaults:
+    - model.yaml
+    - dataset: cmap_dataset.yaml
+    - _self_
+
+model:  # override model.yaml
+    encoder:
+        pretrain: null
+
+dataset:  # override cmap_dataset.yaml
+    batch_size: 10  # total grasps of (robot, object) combination
+
+split_batch_size: 5
+gpu: 2
+name: 'model_origin'
+validate_epochs:
+   - 100

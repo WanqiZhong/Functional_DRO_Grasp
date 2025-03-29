@@ -1,19 +1,17 @@
 robot_names:
-  # - 'barrett'
-  # - 'allegro'
-  # - 'shadowhand'
+  # - 'retarget_allegro'
+  # - 'retarget_leaphand'
   - 'retarget_shadowhand'
 
 debug_object_names: null  # use part of the dataset, for debug only
-dataset_name: 'combine'
-complex_language_type: 'openai_256'
+dataset_name: 'oakink'
+complex_language_type: 'clip_512'
 
-batch_size: 16
+batch_size: 32
 num_workers: 16
 object_pc_type: 'random'  # 'fixed', 'random', 'partial'
 
 ratio:
-  # barrett: 3
-  # allegro: 4
-  # shadowhand: 5
-  retarget_shadowhand: 8
+  # retarget_allegro: 4
+  # retarget_leaphand: 4
+  retarget_shadowhand: 5

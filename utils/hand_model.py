@@ -163,7 +163,7 @@ class HandModel:
         :return: initial q: (6 + DOF,), euler representation
         """
         if q is None:  # random sample root rotation and joint values
-            print("Randomly sample initial q.")
+            # print("Randomly sample initial q.")
             q_initial = torch.zeros(self.dof, dtype=torch.float32, device=self.device)
 
             q_initial[3:6] = (torch.rand(3) * 2 - 1) * torch.pi
@@ -321,11 +321,6 @@ class HandModel:
         """
         robot_pc_target = farthest_point_sampling(verts, 512)
         return robot_pc_target
-
-
-
-        
-
 
 
 def create_hand_model(

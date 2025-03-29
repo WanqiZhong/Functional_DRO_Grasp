@@ -6,7 +6,7 @@ from cvxpylayers.torch import CvxpyLayer
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.rotation import *
+from DRO_Grasp.utils.rotation import *
 
 
 def process_transform(pk_chain, transform, device=None):

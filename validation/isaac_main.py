@@ -55,11 +55,13 @@ def isaac_main(
     robot_urdf_path = urdf_assets_meta['urdf_path'][robot_name]
     object_name_split = object_name.split('+') if object_name is not None else None
     # object_urdf_path = f'{object_name_split[0]}/{object_name_split[1]}/{object_name_split[1]}.urdf'
-    if dataset_name == "oakink":
-        object_urdf_path = f'{object_name_split[0]}/{object_name_split[1]}/coacd_decomposed_object_one_link_{object_id}.urdf'
-        print(f"[Isaac] Using specific object urdf: {object_id}")
-    else:
+    if dataset_name == "cmap":
         object_urdf_path = f'{object_name_split[0]}/{object_name_split[1]}/coacd_decomposed_object_one_link.urdf'
+    else:
+        object_urdf_path = f'{object_name_split[0]}/{object_name_split[1]}/coacd_decomposed_object_one_link_{object_id}.urdf'
+        if not os.path.exists(os.path.join(data_urdf_path, 'object', object_urdf_path)):
+            return 0, None
+        print(f"[Isaac] Using specific object urdf: {object_id}")
 
     hand = create_hand_model(robot_name)
     joint_orders = hand.get_joint_orders()

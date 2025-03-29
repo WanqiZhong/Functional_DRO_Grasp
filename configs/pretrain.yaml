@@ -4,11 +4,13 @@ defaults:
   - dataset: pretrain_dataset.yaml
   - _self_
 
-name: 'pretrain_3robots_not_fix_initial_q_100'
+name: 'pretrain_3robots_dgcnn_acc'
 
 seed: 42
 gpu:
-  - 0
+  # - 0
+  - 1
+  # - 2
   # - 3
   # - 4
   # - 5
@@ -26,7 +28,7 @@ model:  # override model.yaml
         pretrain: null
 
 training:
-  max_epochs: 100
+  max_epochs: 200
 
   save_dir: '${output_dir}/state_dict'
   save_every_n_epoch: 5

@@ -51,7 +51,8 @@ def main(cfg):
     network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device))
     network.eval()
 
-    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-16_09-58-23_oakink_rotmat_all_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-17_17-11-38/res_diffuser_100.pkl"
+    
+    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-16_09-58-23_oakink_rotmat_all_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-10_16-10-39-teapot/res_diffuser_161.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-13_16-25-26_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-14_10-32-59/res_diffuser_100.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-13_16-25-26_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-14_10-37-30/res_diffuser_10516.pkl"
 
@@ -77,9 +78,44 @@ def main(cfg):
     for idx, data in enumerate(tqdm(results)):
         # 创建手部模型
 
-        predict_q = data['ddpm_qpos'][0].float().to(device).unsqueeze(0)
+        # 初始化手部姿态
+        initial_q = hand.get_fixed_initial_q()
+        if "all" not in result_path:
+            initial_q = torch.cat([data['ddpm_qpos'][0].float().to(device), initial_q[6:]])
+        else:
+            initial_q = torch.cat([data['ddpm_qpos'][0].float()[:6].to(device), initial_q[6:]])
+        initial_q = initial_q.unsqueeze(0)
 
-        robot_pc_initial = hand.get_transformed_links_pc(predict_q)[..., :3].unsqueeze(0).to(device)
+        robot_pc_initial = hand.get_transformed_links_pc(initial_q)[..., :3].unsqueeze(0).to(device)
+
+        # 获取物体点云
+        object_pc = _get_object_pc(
+            data['object_name'][0], 
+            data['object_id'][0], 
+            data['robot_name'][0]
+        ).to(device).unsqueeze(0)
+
+        # 首先从 complex_language_embedding_openai_256 中获取语言嵌入，如果不存在则使用 complex_openai_embedding
+        language_emb = data.get('complex_language_embedding_openai_256', data.get('complex_openai_embedding')).to(device) if data.get('complex_language_embedding_openai_256') is not None else data.get('complex_openai_embedding').to(device)
+
+        # 网络推理
+        with torch.no_grad():
+            dro = network(
+                robot_pc_initial,
+                object_pc,
+                language_emb=data['complex_language_embedding_openai_256'].to(device)
+                # language_emb=data['complex_openai_embedding'].to(device)
+            )['dro'].detach()
+
+        # 后处理与优化
+        mlat_pc = multilateration(dro, object_pc)
+        transform, _ = compute_link_pose(hand.links_pc, mlat_pc, is_train=False)
+        optim_transform = process_transform(hand.pk_chain, transform)
+
+        layer = create_problem(hand.pk_chain, optim_transform.keys())
+        predict_q = optimization(hand.pk_chain, layer, initial_q, optim_transform)
+
+        # 将计算得到的 predict_q 保存到当前样本的字典中
         data['predict_q'] = predict_q.cpu()
 
         # 计算 Chamfer 距离

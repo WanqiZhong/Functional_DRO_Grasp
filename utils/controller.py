@@ -9,8 +9,8 @@ import viser
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from utils.hand_model import create_hand_model
-from utils.rotation import q_rot6d_to_q_euler
+from DRO_Grasp.utils.hand_model import create_hand_model
+from DRO_Grasp.utils.rotation import q_rot6d_to_q_euler
 
 
 def get_link_dir(robot_name, joint_name):

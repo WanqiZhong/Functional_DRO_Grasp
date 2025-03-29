@@ -116,6 +116,15 @@ def get_object_vertices(object_name, object_id):
 
     return vertices, np.asarray(object_mesh.triangles)
 
+def get_simplified_object_vertices(object_name, object_id):
+    name = object_name.split('+')
+    obj_mesh_path = os.path.join(f"/data/zwq/code/BODex/src/curobo/content/assets/object/oakink_obj/processed_data/{name[-1]}_{object_id}/mesh/coacd.obj")
+    # obj_mesh_path = os.path.join(f"/data/zwq/code/BODex/src/curobo/content/assets/object/oakink_obj/processed_data/{name[-1]}_{object_id}/mesh/simplified.obj")
+    object_mesh = o3d.io.read_triangle_mesh(obj_mesh_path)
+    vertices = np.asarray(object_mesh.vertices)
+
+    return vertices, np.asarray(object_mesh.triangles)
+
 def _get_object_pc(object_name, object_id, robot_name):
     name = object_name.split('+')
     object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}/{object_id}.pt') if (robot_name == 'mano' or robot_name == 'retarget_shadowhand') \
@@ -123,7 +132,7 @@ def _get_object_pc(object_name, object_id, robot_name):
     object_pc = torch.load(object_path)[:, :3]
     return object_pc
 
-@hydra.main(version_base="1.2", config_path="configs", config_name="validate_retarget_language_larger_transformer_openad_dgcnn")
+@hydra.main(version_base="1.2", config_path="configs", config_name="validate_clip_512_add_dgcnn")
 def main(cfg):
     print("******************************** [Config] ********************************")    
     device = torch.device(f'cuda:{cfg.gpu}')
@@ -143,40 +152,49 @@ def main(cfg):
     # network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device))
     # network.eval()
 
-    result_path = os.path.join(ROOT_DIR, "results_with_predict_q.pkl")
+    use_openad = False
+    
+    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-17_21-34-30_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-10_18-12-22/res_diffuser_dro_predict_q.pkl"
+    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-17_21-34-30_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-20_17-43-37/res_diffuser_dro_predict_q.pkl"
+    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-16_09-58-23_oakink_rotmat_all_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-20_18-55-58/res_diffuser_dro_predict_q.pkl"
+    # result_path = os.path.join(ROOT_DIR, "results_with_predict_q_145_our.pkl")
+    # result_path = os.path.join(ROOT_DIR, "results_with_predict_q_145_knife.pkl")
+    # result_path = os.path.join(ROOT_DIR, "results_with_predict_q_145.pkl")
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-08_18-07-23_oakink_all_dof/eval/final/2025-01-09_22-02-54/res_diffuser_100.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-08_18-07-23_oakink_all_dof/eval/final/2025-01-09_22-24-16/res_diffuser_1000.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-08_18-07-23_oakink_all_dof/eval/final_validate_data/2025-01-10_02-03-02/res_diffuser_1000.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-15_04-21-46_robot_rotmat_oakink/eval/final/2025-01-18_20-40-45/res_diffuser_3000.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-15_04-21-46_robot_rotmat_oakink/eval/final_validate_data/2025-01-18_23-25-25/res_diffuser_3000.pkl"
     # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-01-08_15-39-57_6dof_oakink/eval/final/2025-01-09_22-02-57/res_diffuser_100.pkl"
+    print(f"Loading results from: {result_path}")
     results = load_results(result_path)['results']
 
-    # Filter out results with chamfer distance >= 5
+    # Filter out results with chamfer distance >= 3
     # results = [result for result in results if result['chamfer_value'] >= 3]
     print(len(results))
 
-    openad_config = "/data/zwq/code/OpenAD/config/openad_pn2/full_shape_cfg_downsample_oakink_combine.py"
-    openad_checkpoint = "/data/zwq/code/OpenAD/log/openad_pn2/OPENAD_PN2_FULL_SHAPE_Downsample_Combine_New_Spilt/best_model.t7"
 
-    openad_cfg = Config.fromfile(openad_config)
+    if use_openad:
+        openad_config = "/data/zwq/code/OpenAD/config/openad_pn2/full_shape_cfg_downsample_oakink_combine.py"
+        openad_checkpoint = "/data/zwq/code/OpenAD/log/openad_pn2/OPENAD_PN2_FULL_SHAPE_Downsample_Combine_New_Spilt/best_model.t7"
+        openad_cfg = Config.fromfile(openad_config)
 
-    if "oakinknet" in openad_cfg.data.dataset_name:
-        dataset_file = os.path.join(openad_cfg.data.data_root, 'oakink_full_segmentation_avg_5000.pt')
-        all_dataset = torch.load(dataset_file)
-        all_label = list(all_dataset['label'])
-        openad_cfg.training_cfg.train_affordance = all_label
-        print(openad_cfg.training_cfg.train_affordance)
+        if "oakinknet" in openad_cfg.data.dataset_name:
+            dataset_file = os.path.join(openad_cfg.data.data_root, 'oakink_full_segmentation_avg_5000.pt')
+            all_dataset = torch.load(dataset_file)
+            all_label = list(all_dataset['label'])
+            openad_cfg.training_cfg.train_affordance = all_label
+            print(openad_cfg.training_cfg.train_affordance)
 
-    openad_model = build_model(openad_cfg).to(device)
-    color_map = create_affordance_color_map(openad_cfg.training_cfg.train_affordance)
+        openad_model = build_model(openad_cfg).to(device)
+        color_map = create_affordance_color_map(openad_cfg.training_cfg.train_affordance)
 
-    _, exten = os.path.splitext(openad_checkpoint)
-    if exten == '.t7':
-        openad_model.load_state_dict(torch.load(openad_checkpoint))
-    elif exten == '.pth':
-        check = torch.load(openad_checkpoint) 
-        openad_model.load_state_dict(check['model_state_dict'])  
+        _, exten = os.path.splitext(openad_checkpoint)
+        if exten == '.t7':
+            openad_model.load_state_dict(torch.load(openad_checkpoint))
+        elif exten == '.pth':
+            check = torch.load(openad_checkpoint) 
+            openad_model.load_state_dict(check['model_state_dict'])  
 
     def on_update(grasp_id):
 
@@ -190,7 +208,7 @@ def main(cfg):
         # Get robot point cloud from ddpm_qpos
         initial_q = hand.get_fixed_initial_q()
 
-        if "oakink_all_dof" not in result_path:
+        if "all" not in result_path:
             initial_q = torch.cat([data['ddpm_qpos'][0].float().to(device), initial_q[6:]])
         else:
             initial_q = torch.cat([data['ddpm_qpos'][0].float()[:6].to(device), initial_q[6:]])
@@ -200,7 +218,7 @@ def main(cfg):
         # initial_q = data['nofix_initial_q'].to(device)
         robot_pc_initial = hand.get_transformed_links_pc(initial_q)[..., :3].unsqueeze(0).to(device)
 
-        print(f"Grasp ID: {grasp_id}, Robot: {robot_name}, Object: {data['object_name'][0]}")
+        print(f"Grasp ID: {grasp_id}, Robot: {robot_name}, Object: {data['object_name'][0]}/{data['object_id'][0]}")
         print(f"Grasp sentence: {data['complex_language_sentence'][0]}")
         
         # Get object point cloud
@@ -210,6 +228,7 @@ def main(cfg):
             data['robot_name'][0]
         ).to(device).unsqueeze(0)
         object_mesh, object_faces = get_object_vertices(data['object_name'][0], data['object_id'][0])
+        simplified_object_mesh, simplified_object_faces = get_simplified_object_vertices(data['object_name'][0], data['object_id'][0])
 
         predict_q = data['predict_q'][0].to(device).unsqueeze(0)
         robot_predict_mesh = hand.get_trimesh_q(predict_q)["visual"]
@@ -218,23 +237,41 @@ def main(cfg):
         robot_initial_mesh = hand.get_trimesh_q(initial_q)["visual"]
         robot_target_mesh = hand.get_trimesh_q(data['target_q'][0])["visual"]
 
-        affordance_pred = process_affordance(openad_model, object_pc.squeeze(0), openad_cfg.training_cfg.train_affordance)
-
         server.scene.reset()
-        visualize_results(
-            object_pc,
-            affordance_pred,
-            openad_cfg.training_cfg.train_affordance,
-            server.scene,
-            color_map
-        )
+
+        if use_openad:
+            affordance_pred = process_affordance(openad_model, object_pc.squeeze(0), openad_cfg.training_cfg.train_affordance)
+            visualize_results(
+                object_pc,
+                affordance_pred,
+                openad_cfg.training_cfg.train_affordance,
+                server.scene,
+                color_map
+            )
 
         # Visualize in viser
         server.scene.add_mesh_simple(
             name='ddpm_initial_hand',
             vertices=robot_initial_mesh.vertices,
             faces=robot_initial_mesh.faces,
-            color=(192, 102, 255),
+            # color=(102, 192, 255),
+            # change to light purple
+            color=(255, 102, 192),
+            opacity=0.5
+        )
+
+
+        test_hand = create_hand_model('allegro', device)
+        test_q = test_hand.get_fixed_initial_q()
+        test_mesh = test_hand.get_trimesh_q(test_q)["visual"]
+
+        server.scene.add_mesh_simple(
+            name='fix',
+            vertices=test_mesh.vertices,
+            faces=test_mesh.faces,
+            # color=(102, 192, 255),
+            # change to light purple
+            color=(255, 102, 192),
             opacity=0.5
         )
 
@@ -253,14 +290,23 @@ def main(cfg):
         #     point_size=0.003,
         #     point_shape='circle'
         # )
+
+
         server.scene.add_mesh_simple(
             name='object_mesh',
             vertices=object_mesh,
             faces=object_faces,
-            color=(102, 192, 255),
+            color=(102, 255, 192),
             opacity=0.5
         )
 
+        server.scene.add_mesh_simple(
+            name='simplified_object_mesh',
+            vertices=simplified_object_mesh,
+            faces=simplified_object_faces,
+            color=(102, 255, 192),
+            opacity=0.5
+        )
        
         server.scene.add_mesh_simple(
             name='predict_hand',
@@ -284,7 +330,6 @@ def main(cfg):
             position=(0.2, 0.2, 0.2)
         )
         
-
 
     # Create slider for interaction
     grasp_slider = server.gui.add_slider(
