@@ -1415,3 +1415,110 @@ def create_network(cfg, mode):
         mode=mode
     )
     return network
+
+
+class Network_clip_attn_dgcnn(nn.Module):
+    def __init__(self, cfg, mode):
+        super(Network_clip_attn_dgcnn, self).__init__()
+        self.cfg = cfg
+        self.mode = mode
+
+        self.encoder_robot = create_encoder_network(emb_dim=cfg.emb_dim, pretrain=cfg.pretrain)
+        self.encoder_object = create_encoder_network(emb_dim=cfg.emb_dim)
+
+        self.transformer_robot = Transformer(emb_dim=cfg.emb_dim, ff_dims=2*(cfg.emb_dim), n_blocks=4)
+        self.transformer_object = Transformer(emb_dim=cfg.emb_dim, ff_dims=2*(cfg.emb_dim), n_blocks=4)
+
+        self.kernel = MLPKernel(cfg.emb_dim)
+
+    def forward(self, robot_pc, object_pc, target_pc=None, intent=None, 
+                visualize=False, cross_object_pc=None, language_emb=None, debug_pc=None):
+
+        if self.cfg.center_pc:  # zero-mean the robot point cloud
+            robot_pc = robot_pc - robot_pc.mean(dim=1, keepdim=True)
+
+        # point cloud encoder
+        robot_embedding = self.encoder_robot(robot_pc)
+        object_embedding = self.encoder_object(object_pc)
+
+        if self.cfg.pretrain is not None:
+            robot_embedding = robot_embedding.detach()
+
+        assert self.cfg.use_language, 'Must use language embedding.'
+        
+        # CVAE encoder
+        z = language_emb
+        mu, logvar = None, None
+        z = z.unsqueeze(dim=1)  # (B, 1, latent_dim)
+        
+        # Element-wise addition
+        robot_embedding_z = torch.cat([robot_embedding, z], dim=1)  # (B, N+1, latent_dim)
+        object_embedding_z = torch.cat([object_embedding, z], dim=1)  # (B, N+1, latent_dim)
+
+        # point cloud transformer
+        transformer_robot_outputs = self.transformer_robot(robot_embedding, object_embedding_z)
+        transformer_object_outputs = self.transformer_object(object_embedding, robot_embedding_z)
+
+        robot_embedding_tf = robot_embedding + transformer_robot_outputs["src_embedding"]
+        object_embedding_tf = object_embedding + transformer_object_outputs["src_embedding"]
+
+        Phi_A = robot_embedding_tf
+        Phi_B = object_embedding_tf
+
+        # Compute D(R,O) matrix
+        if self.cfg.block_computing:  # use matrix block computation to save GPU memory
+            B, N, D = Phi_A.shape
+            block_num = 4  # experimental result, reaching a balance between speed and GPU memory
+            N_block = N // block_num
+            assert N % N_block == 0, 'Unable to perform block computation.'
+
+            dro = torch.zeros([B, N, N], dtype=torch.float32, device=Phi_A.device)
+            for A_i in range(block_num):
+                Phi_A_block = Phi_A[:, A_i * N_block: (A_i + 1) * N_block, :]  # (B, N_block, D)
+                for B_i in range(block_num):
+                    Phi_B_block = Phi_B[:, B_i * N_block: (B_i + 1) * N_block, :]  # (B, N_block, D)
+
+                    Phi_A_r = Phi_A_block.unsqueeze(2).repeat(1, 1, N_block, 1).reshape(B * N_block * N_block, D)
+                    Phi_B_r = Phi_B_block.unsqueeze(1).repeat(1, N_block, 1, 1).reshape(B * N_block * N_block, D)
+
+                    dro[:, A_i * N_block: (A_i + 1) * N_block, B_i * N_block: (B_i + 1) * N_block] \
+                        = self.kernel(Phi_A_r, Phi_B_r).reshape(B, N_block, N_block)
+        else:
+            Phi_A_r = (
+                Phi_A.unsqueeze(2)
+                .repeat(1, 1, Phi_B.shape[1], 1)
+                .reshape(Phi_A.shape[0] * Phi_A.shape[1] * Phi_B.shape[1], Phi_A.shape[2])
+            )
+            Phi_B_r = (
+                Phi_B.unsqueeze(1)
+                .repeat(1, Phi_A.shape[1], 1, 1)
+                .reshape(Phi_B.shape[0] * Phi_A.shape[1] * Phi_B.shape[1], Phi_B.shape[2])
+            )
+            dro = self.kernel(Phi_A_r, Phi_B_r).reshape(Phi_A.shape[0], Phi_A.shape[1], Phi_B.shape[1])
+
+        outputs = {
+            'dro': dro,
+            'mu': mu,
+            'logvar': logvar,
+        }
+
+         # Visualize
+        if visualize:
+            point_clouds = [object_pc[0], robot_pc[0]]
+            labels = ["Object Point Cloud", "Robot Point Cloud"]
+            colors = ['g', 'r']
+
+            if target_pc is not None:
+                point_clouds.append(target_pc[0])
+                labels.append("Target Robot Point Cloud")
+                colors.append('b')
+            
+        return outputs
+
+
+def create_network_clip_attn_dgcnn(cfg, mode):
+    network = Network_clip_attn_dgcnn(
+        cfg=cfg,
+        mode=mode
+    )
+    return network

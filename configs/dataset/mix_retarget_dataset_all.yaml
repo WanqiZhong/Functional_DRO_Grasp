@@ -1,5 +1,5 @@
 robot_names:
-  - 'retarget_allegro'
+  # - 'retarget_allegro'
   # - 'retarget_leaphand'
   - 'retarget_shadowhand'
 
@@ -7,12 +7,12 @@ debug_object_names: null  # use part of the dataset, for debug only
 dataset_name: 'oakink'
 complex_language_type: 'openai_256'
 
-batch_size: 10  # 1 batch_size ≈ 4 GB GPU memory during training
+batch_size: 1  # 1 batch_size ≈ 4 GB GPU memory during training
 num_workers: 16
 object_pc_type: 'random'  # 'fixed', 'random', 'partial'
 use_valid_data: true
 
 ratio:
-  retarget_allegro: 4
+  # retarget_allegro: 4
   # retarget_leaphand: 4
   retarget_shadowhand: 5

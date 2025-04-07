@@ -1,3 +1,11 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "DRO_Grasp"
+version = "4.0"  
+description = "DRO_Grasp: A Python package for grasping and manipulation tasks"
+readme = "README.md"  
+requires-python = ">=3.11"  
+

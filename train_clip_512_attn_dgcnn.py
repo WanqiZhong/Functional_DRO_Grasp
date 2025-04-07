@@ -10,13 +10,12 @@ from pytorch_lightning.loggers import WandbLogger
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(ROOT_DIR)
 
-from data_utils.CombineRetargetDataset import create_dataloader
-from model.network import create_network_larger_transformer_clip_add_dgcnn_acc
+from data_utils.CombineRetargetDatasetMulti import create_dataloader
+from model.network import create_network_clip_attn_dgcnn
 from model.module import TrainingModule
 
 
-# @hydra.main(version_base="1.2", config_path="configs", config_name="train_clip_512_add_dgcnn")
-@hydra.main(version_base="1.2", config_path="configs", config_name="train_clip_512_add_dgcnn_acc")
+@hydra.main(version_base="1.2", config_path="configs", config_name="train_clip_512_attn_dgcnn")
 def main(cfg):
     print("******************************** [Config] ********************************")
     print(OmegaConf.to_yaml(cfg))
@@ -60,8 +59,7 @@ def main(cfg):
     )
 
     dataloader = create_dataloader(cfg.dataset, is_train=True, fixed_initial_q=False)
-
-    network = create_network_larger_transformer_clip_add_dgcnn_acc(cfg.model, mode='train')
+    network = create_network_clip_attn_dgcnn(cfg.model, mode='train')
     model = TrainingModule(
         cfg=cfg.training,
         network=network,

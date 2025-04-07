@@ -15,7 +15,7 @@ dataset:  # override cmap_dataset.yaml
 split_batch_size: 1  # limited by GPU memory
 gpu: 1
 # name: 'model_language_nofix_initial_larger_transformer_clip_512_dgcnn_new_spilt_short_sentence'
-name: 'model_clip_512_add_dgcnn_acc_valid'
+name: 'model_clip_512_add_dgcnn_valid'
 
 validate_epochs:
 #    - 40
@@ -27,4 +27,4 @@ validate_epochs:
 #    - 70
 #    - 85
 #    - 145
-   - 200
+   - 150

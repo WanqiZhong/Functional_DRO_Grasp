@@ -2,9 +2,9 @@ model:
   emb_dim: 512
   latent_dim: 512
 
-  pretrain: pretrain_shadow_dgcnn_acc.pth
+  pretrain: pretrain_3robots.pth
   obj_pretrain: null
-  train: model_shadow.pth
+  train: model_3robots.pth
 
   center_pc: True
   block_computing: True

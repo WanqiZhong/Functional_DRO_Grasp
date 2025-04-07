@@ -1,5 +1,7 @@
 import sys
 import os
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
 import json
 import math
 import hydra
@@ -8,12 +10,11 @@ import trimesh
 import torch
 from torch.utils.data import Dataset, DataLoader
 import open3d as o3d
-from collections import defaultdict
 from DRO_Grasp.utils.hand_model import create_hand_model, HandModel
-import numpy as np
 from tqdm import tqdm
+import numpy as np
+from collections import defaultdict
 
-# Existing constant mappings
 RATIO_MAP = {
     'shadowhand': 8,
     # 'retarget_shadowhand': 5,
@@ -28,113 +29,6 @@ INTENT_MAP = {
     'handover': 3
 }
 
-def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ratio=0.8, seed=42):
-    """
-    Split OakInk dataset by object ID within each object name category.
-    
-    Args:
-        oakink_metadata: List of metadata entries for OakInk dataset
-        min_objects_for_split: Minimum number of object IDs needed to perform a split (otherwise all go to training)
-        train_ratio: Ratio of object IDs to use for training
-        seed: Random seed for reproducibility
-        
-    Returns:
-        train_metadata: List of metadata entries for training
-        test_metadata: List of metadata entries for testing
-        split_stats: Dictionary with statistics about the split
-    """
-    # Group metadata by object name
-    object_name_to_ids = defaultdict(set)
-    for entry in oakink_metadata:
-        object_name = entry[5].split('+')[1]  # Get the object name (category)
-        object_id = entry[7]  # Get the object ID
-        object_name_to_ids[object_name].add(object_id)
-    
-    # Prepare containers for results
-    train_metadata = []
-    test_metadata = []
-    split_stats = {
-        "object_categories": {},
-        "total": {
-            "categories": 0,
-            "categories_split": 0,
-            "categories_all_train": 0,
-            "object_ids": {
-                "total": 0,
-                "train": 0,
-                "test": 0
-            },
-            "samples": {
-                "total": 0,
-                "train": 0,
-                "test": 0
-            }
-        }
-    }
-    
-    # For each object name, split its object IDs
-    random_generator = random.Random(seed)
-    
-    for object_name, object_ids in object_name_to_ids.items():
-        object_ids_list = list(object_ids)
-        category_stats = {
-            "total_object_ids": len(object_ids_list),
-            "train_object_ids": 0,
-            "test_object_ids": 0,
-            "total_samples": 0,
-            "train_samples": 0,
-            "test_samples": 0,
-            "train_ids": [],
-            "test_ids": []
-        }
-        
-        # Decide on train/test split
-        if len(object_ids_list) < min_objects_for_split:
-            # If too few object IDs, put all in training
-            train_ids = object_ids_list
-            test_ids = []
-            split_stats["total"]["categories_all_train"] += 1
-        else:
-            # Otherwise do the split
-            random_generator.shuffle(object_ids_list)
-            train_size = int(len(object_ids_list) * train_ratio)
-            train_ids = object_ids_list[:train_size]
-            test_ids = object_ids_list[train_size:]
-            split_stats["total"]["categories_split"] += 1
-        
-        # Update category statistics
-        category_stats["train_object_ids"] = len(train_ids)
-        category_stats["test_object_ids"] = len(test_ids)
-        category_stats["train_ids"] = train_ids
-        category_stats["test_ids"] = test_ids
-        
-        # Assign metadata entries to train or test based on their object IDs
-        for entry in oakink_metadata:
-            entry_object_name = entry[5].split('+')[1]
-            entry_object_id = entry[7]
-            
-            if entry_object_name == object_name:
-                category_stats["total_samples"] += 1
-                if entry_object_id in train_ids:
-                    train_metadata.append(entry)
-                    category_stats["train_samples"] += 1
-                elif entry_object_id in test_ids:
-                    test_metadata.append(entry)
-                    category_stats["test_samples"] += 1
-        
-        # Store category statistics
-        split_stats["object_categories"][object_name] = category_stats
-        
-        # Update total statistics
-        split_stats["total"]["categories"] += 1
-        split_stats["total"]["object_ids"]["total"] += len(object_ids_list)
-        split_stats["total"]["object_ids"]["train"] += len(train_ids)
-        split_stats["total"]["object_ids"]["test"] += len(test_ids)
-        split_stats["total"]["samples"]["total"] += category_stats["total_samples"]
-        split_stats["total"]["samples"]["train"] += category_stats["train_samples"]
-        split_stats["total"]["samples"]["test"] += category_stats["test_samples"]
-    
-    return train_metadata, test_metadata, split_stats
 
 class CombineDataset(Dataset):
     def __init__(
@@ -145,7 +39,7 @@ class CombineDataset(Dataset):
         debug_object_names: list = None,
         num_points: int = 512,
         object_pc_type: str = 'random',
-        cross_object: bool = True,
+        cross_obejct: bool = True,
         data_ratio = None,
         fixed_initial_q: bool = False,
         fix_sample = False,
@@ -163,7 +57,7 @@ class CombineDataset(Dataset):
         self.num_points = num_points
         self.object_pc_type = object_pc_type
         self.use_fixed_initial_q = fixed_initial_q
-        self.cross_object = cross_object
+        self.cross_object = cross_obejct
         self.fix_sample = fix_sample
         self.only_palm = only_palm
         self.complex_language_type = complex_language_type
@@ -171,14 +65,14 @@ class CombineDataset(Dataset):
         self.use_dro = use_dro
         self.dataset_name = dataset_name
         self.use_valid_data = use_valid_data
-        self.ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         # Load Hand (Both CMapDataset and OakInkDataset)
         self.hands = {}
         self.dofs = []
-        self.robot_ratio = {}
+        self.robot_ratio ={}
         self.oakink_metadata = []
         self.cmap_metadata = []
+
 
         for robot_name in self.robot_names:
             self.hands[robot_name] = create_hand_model(robot_name.split('_')[1] if "retarget" in robot_name else robot_name, torch.device('cpu'), self.num_points)
@@ -197,20 +91,24 @@ class CombineDataset(Dataset):
             hand = self.hands[robot_name]
             robot_initial_q = hand.get_fixed_initial_q()
             self.robot_fix_initial_q[robot_name] = robot_initial_q
-            robot_initial_q_pc = hand.get_transformed_links_pc(robot_initial_q, only_palm=self.only_palm)[:, :3]
+            robot_initial_q_pc =  hand.get_transformed_links_pc(robot_initial_q, only_palm=self.only_palm)[:, :3]
             self.robot_fix_initial_q_pc[robot_name] = robot_initial_q_pc
 
-        # Load CMapDataset (keep original split logic for CMAP)
+
         if dataset_name == 'combine' or dataset_name == 'cmap':
+            # Load CMapDataset
             print("Loading CMapDataset...")
-            cmap_split_json_path = os.path.join(self.ROOT_DIR, 'data/CMapDataset_filtered/split_train_validate_objects.json')
+            cmap_split_json_path = os.path.join(ROOT_DIR, 'data/CMapDataset_filtered/split_train_validate_objects.json')
             cmap_dataset_split = json.load(open(cmap_split_json_path))
             if self.is_train:
                 self.cmap_object_names = cmap_dataset_split['train']
             else:
                 self.cmap_object_names = cmap_dataset_split['validate']
-            
-            cmap_dataset_path = os.path.join(self.ROOT_DIR, 'data/CMapDataset_filtered/cmap_dataset.pt')
+            # if debug_object_names is not None:
+            #     print("!!! Using debug objects for CMapDataset !!!")
+            #     self.cmap_object_names = debug_object_names
+
+            cmap_dataset_path = os.path.join(ROOT_DIR, 'data/CMapDataset_filtered/cmap_dataset.pt')
             cmap_metadata = torch.load(cmap_dataset_path)['metadata']
             self.cmap_metadata = [m for m in cmap_metadata if m[1] in self.cmap_object_names and m[2] in self.robot_names]
 
@@ -220,7 +118,7 @@ class CombineDataset(Dataset):
             if self.object_pc_type != 'fixed':
                 for object_name in tqdm(self.cmap_object_names, desc="Loading CMapDataset object pcs"):
                     name = object_name.split('+')
-                    mesh_path = os.path.join(self.ROOT_DIR, f'data/data_urdf/object/{name[0]}/{name[1]}/{name[1]}.stl')
+                    mesh_path = os.path.join(ROOT_DIR, f'data/data_urdf/object/{name[0]}/{name[1]}/{name[1]}.stl')
                     mesh = o3d.io.read_triangle_mesh(mesh_path)
                     pcd = mesh.sample_points_uniformly(65536)
                     object_pc = np.asarray(pcd.points)
@@ -228,65 +126,101 @@ class CombineDataset(Dataset):
             else:
                 print("!!! Using fixed object pcs for CMapDataset !!!")
 
-        # Load OakInk Dataset with new split logic
         if dataset_name == 'combine' or dataset_name == 'oakink':
-            all_oakink_metadata = []
-            
-            # Load MANO data if needed
+
             if "mano" in self.robot_names:
-                print("Loading OakInkDataset for MANO...")
-                oakink_dataset_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all.pt')
+
+                print("Loading OakInkDataset...")
+
+                oakink_dataset_path = os.path.join(ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all.pt')
                 oakink_metadata = torch.load(oakink_dataset_path)['metadata']
-                mano_metadata = [m for m in oakink_metadata if m[6] in self.robot_names]
-                all_oakink_metadata.extend(mano_metadata)
+                oakink_metadata_filtered = [m for m in oakink_metadata if m[6] in self.robot_names]
+                
+                object_to_metadata = defaultdict(list)
+                for m in oakink_metadata_filtered:
+                    object_name = m[5]
+                    object_to_metadata[object_name].append(m)
 
-            # Load retargeted data if needed
-            for robot_name in self.robot_names:
-                if 'retarget' in robot_name:
-                    base_robot_name = robot_name.split('_')[1]
-                    print(f"Loading OakInkDataset for retargeted {base_robot_name}...")
-                    
-                    if self.use_valid_data:
-                        oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{base_robot_name}_valid_dro.pt')
+                if debug_object_names is not None:
+                    print("!!! Using debug objects for OakInkDataset !!!")
+                    object_to_metadata = {obj: metas for obj, metas in object_to_metadata.items() if obj in debug_object_names}
+                else:
+                    object_to_metadata = dict(object_to_metadata)
+
+
+                global_seed = 42
+                oakink_metadata_split = []
+                for object_name in sorted(object_to_metadata.keys()):
+                    meta_list = object_to_metadata[object_name]
+                    local_rng = random.Random(f"{global_seed}_{object_name}")
+                    meta_list_shuffled = meta_list.copy()
+                    local_rng.shuffle(meta_list_shuffled)
+                    n_train = int(0.8 * len(meta_list_shuffled))
+                    # if debug_object_names is not None:
+                    #     oakink_metadata_split.extend(meta_list_shuffled)
+                    # else:
+                    if is_train:
+                        oakink_metadata_split.extend(meta_list_shuffled[:n_train])
                     else:
-                        oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{base_robot_name}.pt')
-                    
-                    oakink_metadata = torch.load(oakink_dataset_path)['metadata']
-                    retarget_metadata = [m for m in oakink_metadata if m[6] == base_robot_name]
-                    all_oakink_metadata.extend(retarget_metadata)
-            
-            # Filter by debug objects if specified
-            if debug_object_names is not None:
-                print("!!! Using debug objects for OakInkDataset !!!")
-                all_oakink_metadata = [m for m in all_oakink_metadata if m[5] in debug_object_names]
-            
-            # Apply the new split logic
-            train_metadata, test_metadata, split_stats = split_oakink_by_object_id(all_oakink_metadata)
-            
-            # Save the split statistics to a JSON file
-            split_stats_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/object_id_split_stats.json')
-            with open(split_stats_path, 'w') as f:
-                json.dump(split_stats, f, indent=2)
-            print(f"Split statistics saved to {split_stats_path}")
-            
-            # Assign the appropriate set based on is_train flag
-            if self.is_train:
-                self.oakink_metadata = train_metadata
-                print(f"Using {len(train_metadata)} OakInk training samples")
-            else:
-                self.oakink_metadata = test_metadata
-                print(f"Using {len(test_metadata)} OakInk testing samples")
+                        oakink_metadata_split.extend(meta_list_shuffled[n_train:])
 
-            # Load OakInkShape point clouds
+                self.oakink_metadata.extend(oakink_metadata_split)
+
+
+            for robot_name in self.robot_names:
+
+                if 'retarget' in robot_name:
+                    robot_name = robot_name.split('_')[1]
+                    print("Loading OakInkDataset...")
+
+                    if self.use_valid_data:
+                        oakink_dataset_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{robot_name}_valid_dro.pt')
+                    else:
+                        oakink_dataset_path = os.path.join(ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{robot_name}.pt')
+
+                    oakink_metadata = torch.load(oakink_dataset_path)['metadata']
+                    oakink_metadata_filtered = [m for m in oakink_metadata if m[6] == robot_name]
+                    object_to_metadata = defaultdict(list)
+                    for m in oakink_metadata_filtered:
+                        object_name = m[5]
+                        object_to_metadata[object_name].append(m)
+
+                    if debug_object_names is not None:
+                        print("!!! Using debug objects for OakInkDataset !!!")
+                        print(f"Debug Object Names: {debug_object_names}")
+                        object_to_metadata = {obj: metas for obj, metas in object_to_metadata.items() if obj in debug_object_names}
+                    else:
+                        object_to_metadata = dict(object_to_metadata)
+
+                    global_seed = 42
+                    oakink_metadata_split = []
+                    for object_name in sorted(object_to_metadata.keys()):
+                        meta_list = object_to_metadata[object_name]
+                        local_rng = random.Random(f"{global_seed}_{object_name}")
+                        meta_list_shuffled = meta_list.copy()
+                        local_rng.shuffle(meta_list_shuffled)
+                        n_train = int(0.8 * len(meta_list_shuffled))
+                        # if debug_object_names is not None:
+                        #     oakink_metadata_split.extend(meta_list_shuffled)
+                        # else:
+                        if is_train:
+                            oakink_metadata_split.extend(meta_list_shuffled[:n_train])
+                        else:
+                            oakink_metadata_split.extend(meta_list_shuffled[n_train:])
+
+                    self.oakink_metadata.extend(oakink_metadata_split)
+
             print("Loading OakInkShape pcs...")
-            oakink_object_pcs_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/oakink_object_pcs.pt')
+            oakink_object_pcs_path = os.path.join(ROOT_DIR, 'data/OakInkDataset/oakink_object_pcs.pt')
             self.oakink_object_pcs = torch.load(oakink_object_pcs_path)
 
         # Create metadata dict
         self.category_intent_to_entries = {}
 
-        if self.oakink_metadata:
+        if self.oakink_metadata is not None:
+
             for entry in self.oakink_metadata:
+
                 object_key = entry[5]  
                 intent = entry[4]      
                 object_name = object_key.split('+')[1] 
@@ -304,6 +238,7 @@ class CombineDataset(Dataset):
         self.metadata_robots_objects = {}
 
         for robot_name in self.robot_names:
+
             if robot_name == 'mano':
                 metadata_robot = [m for m in self.oakink_metadata if m[6] == robot_name]
             elif 'retarget' in robot_name:
@@ -330,8 +265,18 @@ class CombineDataset(Dataset):
         if dataset_name == 'oakink' or dataset_name == 'combine':
             self.object_pcs.update(self.oakink_object_pcs)
 
+        # Setup validation combinations
+        # if not self.is_train:
+        #     self.combination = []
+        #     for robot_name in self.robot_names:
+        #         if robot_name == 'mano':
+        #             continue  # 'mano' is not supported in validate mode as per original code
+        #         for object_name in self.cmap_object_names:
+        #             self.combination.append((robot_name, object_name))
+        #     self.combination = sorted(self.combination)
+
         # Load object intent embeddings
-        self.object_intent_embeddings = torch.load(os.path.join(self.ROOT_DIR, 'data/OakInkDataset/clip_object_intent_embeddings.pt'))        
+        self.object_intent_embeddings = torch.load(os.path.join(ROOT_DIR, 'data/OakInkDataset/clip_object_intent_embeddings.pt'))        
 
         print(f"CombineDataset: {len(self)} samples")
         print(f"CombineDataset: {len(self.oakink_metadata)} oakink samples")

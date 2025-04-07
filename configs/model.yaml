@@ -2,7 +2,7 @@ model:
   emb_dim: 512
   latent_dim: 64
 
-  pretrain: pretrain_3robots_origin.pth
+  pretrain: pretrain_3robots.pth
   obj_pretrain: null
   train: model_3robots.pth
 

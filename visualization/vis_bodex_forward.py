@@ -230,6 +230,7 @@ def main():
         # quaternion_2 = matrix_to_euler(torch_quaternion_to_matrix(bodex_q[3:7]))
         # reorder_bodex_q = torch.cat([bodex_q[:3], quaternion_2, bodex_q[12:], bodex_q[7:12]], axis=-1)
         # reorder_bodex_q = reorder_bodex_q.float()
+        
 
         q = torch.tensor(q)
         quaternion = quaternion_to_euler(torch.cat([q[4:7], q[3:4]]))
