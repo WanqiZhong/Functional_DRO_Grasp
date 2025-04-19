@@ -1,17 +1,18 @@
 robot_names:
-  # - 'retarget_allegro'
-  # - 'retarget_leaphand'
-  - 'retarget_shadowhand'
+  - 'leaphand'
+  # - 'shadowhand'
+  # - 'allegro'
 
 debug_object_names: null  # use part of the dataset, for debug only
 dataset_name: 'oakink'
 complex_language_type: 'clip_512'
 
-batch_size: 32
+batch_size: 48
 num_workers: 16
 object_pc_type: 'random'  # 'fixed', 'random', 'partial'
+use_valid_data: true
 
 ratio:
-  # retarget_allegro: 4
-  # retarget_leaphand: 4
-  retarget_shadowhand: 5
+  leaphand: 4
+  # shadowhand: 5
+  # allegro: 4

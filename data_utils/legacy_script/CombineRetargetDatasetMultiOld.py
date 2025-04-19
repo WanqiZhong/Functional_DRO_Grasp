@@ -1,7 +1,5 @@
 import sys
 import os
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(ROOT_DIR)
 import json
 import math
 import hydra
@@ -10,19 +8,15 @@ import trimesh
 import torch
 from torch.utils.data import Dataset, DataLoader
 import open3d as o3d
-from DRO_Grasp.utils.hand_model import create_hand_model, HandModel
-from tqdm import tqdm
-import numpy as np
 from collections import defaultdict
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-
+from DRO_Grasp.utils.hand_model import create_hand_model, HandModel
+import numpy as np
+from tqdm import tqdm
 
 # Existing constant mappings
 RATIO_MAP = {
     'shadowhand': 8,
+    # 'retarget_shadowhand': 5,
     # 'allegro': 4,
     # 'barrett': 3
 }
@@ -37,7 +31,6 @@ INTENT_MAP = {
 def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ratio=0.8, seed=42):
     """
     Split OakInk dataset by object ID within each object name category.
-    Split into train (80%) and test+val (20%), then further split test+val into val and test (50% each).
     
     Args:
         oakink_metadata: List of metadata entries for OakInk dataset
@@ -47,7 +40,6 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
         
     Returns:
         train_metadata: List of metadata entries for training
-        val_metadata: List of metadata entries for validation
         test_metadata: List of metadata entries for testing
         split_stats: Dictionary with statistics about the split
     """
@@ -60,7 +52,6 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
     
     # Prepare containers for results
     train_metadata = []
-    val_metadata = []
     test_metadata = []
     split_stats = {
         "object_categories": {},
@@ -71,32 +62,29 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
             "object_ids": {
                 "total": 0,
                 "train": 0,
-                "val": 0,
                 "test": 0
             },
             "samples": {
                 "total": 0,
                 "train": 0,
-                "val": 0,
                 "test": 0
             }
         }
     }
     
+    # For each object name, split its object IDs
+    random_generator = random.Random(seed)
     
     for object_name, object_ids in object_name_to_ids.items():
         object_ids_list = list(object_ids)
         category_stats = {
             "total_object_ids": len(object_ids_list),
             "train_object_ids": 0,
-            "val_object_ids": 0,
             "test_object_ids": 0,
             "total_samples": 0,
             "train_samples": 0,
-            "val_samples": 0,
             "test_samples": 0,
             "train_ids": [],
-            "val_ids": [],
             "test_ids": []
         }
         
@@ -104,32 +92,23 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
         if len(object_ids_list) < min_objects_for_split:
             # If too few object IDs, put all in training
             train_ids = object_ids_list
-            val_ids = []
             test_ids = []
             split_stats["total"]["categories_all_train"] += 1
         else:
-            # Otherwise do the split - first into train and rest
-            object_ids_list = sorted(object_ids_list)
+            # Otherwise do the split
+            random_generator.shuffle(object_ids_list)
             train_size = int(len(object_ids_list) * train_ratio)
             train_ids = object_ids_list[:train_size]
-            rest_ids = object_ids_list[train_size:]
-            
-            # Then split the remaining 20% into val and test (10% each of the total)
-            val_size = len(rest_ids) // 2
-            val_ids = rest_ids[:val_size]
-            test_ids = rest_ids[val_size:]
-            
+            test_ids = object_ids_list[train_size:]
             split_stats["total"]["categories_split"] += 1
         
         # Update category statistics
         category_stats["train_object_ids"] = len(train_ids)
-        category_stats["val_object_ids"] = len(val_ids)
         category_stats["test_object_ids"] = len(test_ids)
         category_stats["train_ids"] = train_ids
-        category_stats["val_ids"] = val_ids
         category_stats["test_ids"] = test_ids
         
-        # Assign metadata entries to train, val, or test based on their object IDs
+        # Assign metadata entries to train or test based on their object IDs
         for entry in oakink_metadata:
             entry_object_name = entry[5].split('+')[1]
             entry_object_id = entry[7]
@@ -139,9 +118,6 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
                 if entry_object_id in train_ids:
                     train_metadata.append(entry)
                     category_stats["train_samples"] += 1
-                elif entry_object_id in val_ids:
-                    val_metadata.append(entry)
-                    category_stats["val_samples"] += 1
                 elif entry_object_id in test_ids:
                     test_metadata.append(entry)
                     category_stats["test_samples"] += 1
@@ -153,28 +129,28 @@ def split_oakink_by_object_id(oakink_metadata, min_objects_for_split=5, train_ra
         split_stats["total"]["categories"] += 1
         split_stats["total"]["object_ids"]["total"] += len(object_ids_list)
         split_stats["total"]["object_ids"]["train"] += len(train_ids)
-        split_stats["total"]["object_ids"]["val"] += len(val_ids)
         split_stats["total"]["object_ids"]["test"] += len(test_ids)
         split_stats["total"]["samples"]["total"] += category_stats["total_samples"]
         split_stats["total"]["samples"]["train"] += category_stats["train_samples"]
-        split_stats["total"]["samples"]["val"] += category_stats["val_samples"]
         split_stats["total"]["samples"]["test"] += category_stats["test_samples"]
     
-    return train_metadata, val_metadata, test_metadata, split_stats
+    return train_metadata, test_metadata, split_stats
 
 class CombineDataset(Dataset):
     def __init__(
         self,
         batch_size: int,
         robot_names: list = None,
-        mode: str = 'train',  
+        is_train: bool = True,
         debug_object_names: list = None,
         num_points: int = 512,
         object_pc_type: str = 'random',
         cross_object: bool = True,
         data_ratio = None,
         fixed_initial_q: bool = False,
+        fix_sample = False,
         only_palm = False,
+        use_validatedata_in_train_mode = False,
         complex_language_type: str = 'openai_256',  # clip_768, openai_256, clip_512
         provide_pc: bool = True,
         use_dro: bool = True,
@@ -183,12 +159,12 @@ class CombineDataset(Dataset):
     ):
         self.batch_size = batch_size
         self.robot_names = robot_names if robot_names is not None else ['barrett', 'allegro', 'shadowhand']
-        self.mode = mode
-        self.is_train = (mode == 'train')  # For backward compatibility
+        self.is_train = is_train
         self.num_points = num_points
         self.object_pc_type = object_pc_type
         self.use_fixed_initial_q = fixed_initial_q
         self.cross_object = cross_object
+        self.fix_sample = fix_sample
         self.only_palm = only_palm
         self.complex_language_type = complex_language_type
         self.provide_pc = provide_pc
@@ -201,19 +177,16 @@ class CombineDataset(Dataset):
         self.hands = {}
         self.dofs = []
         self.robot_ratio = {}
-        self.metadata = []
-
-        # Seperate different robot in test mode
-        if mode == 'test':
-            assert len(robot_names) == 1, "In test mode, only one robot name is allowed"
+        self.oakink_metadata = []
+        self.cmap_metadata = []
 
         for robot_name in self.robot_names:
-            self.hands[robot_name] = create_hand_model(robot_name, torch.device('cpu'))
+            self.hands[robot_name] = create_hand_model(robot_name.split('_')[1] if "retarget" in robot_name else robot_name, torch.device('cpu'), self.num_points)
             self.dofs.append(math.sqrt(self.hands[robot_name].dof))
             if data_ratio is not None and robot_name in data_ratio:
                 self.robot_ratio[robot_name] = data_ratio[robot_name]
             else:
-                self.robot_ratio[robot_name] = RATIO_MAP.get(robot_name, 1)  # Default to 1 if not found
+                self.robot_ratio[robot_name] = RATIO_MAP[robot_name]
             print(f"Robot {robot_name}: {self.robot_ratio[robot_name]}")
         
         # Create initial_q
@@ -228,27 +201,22 @@ class CombineDataset(Dataset):
             self.robot_fix_initial_q_pc[robot_name] = robot_initial_q_pc
 
         # Load CMapDataset (keep original split logic for CMAP)
-        if dataset_name == 'cmap':
+        if dataset_name == 'combine' or dataset_name == 'cmap':
+            print("Loading CMapDataset...")
             cmap_split_json_path = os.path.join(self.ROOT_DIR, 'data/CMapDataset_filtered/split_train_validate_objects.json')
             cmap_dataset_split = json.load(open(cmap_split_json_path))
-            
-            # Map our new mode to the CMap split
-            if self.mode == 'train':
+            if self.is_train:
                 self.cmap_object_names = cmap_dataset_split['train']
-            else:  # For both 'val' and 'test', we use the CMap validate set
+            else:
                 self.cmap_object_names = cmap_dataset_split['validate']
             
             cmap_dataset_path = os.path.join(self.ROOT_DIR, 'data/CMapDataset_filtered/cmap_dataset.pt')
             cmap_metadata = torch.load(cmap_dataset_path)['metadata']
-            self.metadata = [m for m in cmap_metadata if m[1] in self.cmap_object_names and m[2] in self.robot_names]
-
-            # Set fix shuffle seed for reproducibility
-            random.seed(42)
-            random.shuffle(self.metadata)
+            self.cmap_metadata = [m for m in cmap_metadata if m[1] in self.cmap_object_names and m[2] in self.robot_names]
 
             # Load CMapDataset object_pcs
             print("Loading CMapDataset object_pcs...")
-            self.object_pcs = {}
+            self.cmap_object_pcs = {}
             if self.object_pc_type != 'fixed':
                 for object_name in tqdm(self.cmap_object_names, desc="Loading CMapDataset object pcs"):
                     name = object_name.split('+')
@@ -256,26 +224,36 @@ class CombineDataset(Dataset):
                     mesh = o3d.io.read_triangle_mesh(mesh_path)
                     pcd = mesh.sample_points_uniformly(65536)
                     object_pc = np.asarray(pcd.points)
-                    self.object_pcs[object_name] = torch.tensor(object_pc, dtype=torch.float32)
+                    self.cmap_object_pcs[object_name] = torch.tensor(object_pc, dtype=torch.float32)
             else:
                 print("!!! Using fixed object pcs for CMapDataset !!!")
 
         # Load OakInk Dataset with new split logic
-        elif dataset_name == 'oakink':
-
+        if dataset_name == 'combine' or dataset_name == 'oakink':
             all_oakink_metadata = []
+            
+            # Load MANO data if needed
+            if "mano" in self.robot_names:
+                print("Loading OakInkDataset for MANO...")
+                oakink_dataset_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/oakink_dataset_standard_all.pt')
+                oakink_metadata = torch.load(oakink_dataset_path)['metadata']
+                mano_metadata = [m for m in oakink_metadata if m[6] in self.robot_names]
+                all_oakink_metadata.extend(mano_metadata)
 
             # Load retargeted data if needed
             for robot_name in self.robot_names:
-                                
-                if self.use_valid_data:
-                    oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{robot_name}_valid_dro.pt')
-                else:
-                    oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{robot_name}.pt')
-
-                oakink_metadata = torch.load(oakink_dataset_path)['metadata']
-                print(f"Loading OakInkDataset for retargeted {robot_name} with {len(oakink_metadata)} samples")
-                all_oakink_metadata.extend(oakink_metadata)
+                if 'retarget' in robot_name:
+                    base_robot_name = robot_name.split('_')[1]
+                    print(f"Loading OakInkDataset for retargeted {base_robot_name}...")
+                    
+                    if self.use_valid_data:
+                        oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{base_robot_name}_valid_dro.pt')
+                    else:
+                        oakink_dataset_path = os.path.join(self.ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{base_robot_name}.pt')
+                    
+                    oakink_metadata = torch.load(oakink_dataset_path)['metadata']
+                    retarget_metadata = [m for m in oakink_metadata if m[6] == base_robot_name]
+                    all_oakink_metadata.extend(retarget_metadata)
             
             # Filter by debug objects if specified
             if debug_object_names is not None:
@@ -283,7 +261,7 @@ class CombineDataset(Dataset):
                 all_oakink_metadata = [m for m in all_oakink_metadata if m[5] in debug_object_names]
             
             # Apply the new split logic
-            train_metadata, val_metadata, test_metadata, split_stats = split_oakink_by_object_id(all_oakink_metadata)
+            train_metadata, test_metadata, split_stats = split_oakink_by_object_id(all_oakink_metadata)
             
             # Save the split statistics to a JSON file
             split_stats_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/object_id_split_stats.json')
@@ -291,62 +269,73 @@ class CombineDataset(Dataset):
                 json.dump(split_stats, f, indent=2)
             print(f"Split statistics saved to {split_stats_path}")
             
-            # Assign the appropriate set based on mode flag
-            if self.mode == 'train':
-                self.metadata = train_metadata
+            # Assign the appropriate set based on is_train flag
+            if self.is_train:
+                self.oakink_metadata = train_metadata
                 print(f"Using {len(train_metadata)} OakInk training samples")
-            elif self.mode == 'val':
-                self.metadata = val_metadata
-                print(f"Using {len(val_metadata)} OakInk validation samples")
-            else:  # test
-                self.metadata = test_metadata
+            else:
+                self.oakink_metadata = test_metadata
                 print(f"Using {len(test_metadata)} OakInk testing samples")
-
-            random.seed(42)
-            random.shuffle(self.metadata)
 
             # Load OakInkShape point clouds
             print("Loading OakInkShape pcs...")
             oakink_object_pcs_path = os.path.join(self.ROOT_DIR, 'data/OakInkDataset/oakink_object_pcs.pt')
-            self.object_pcs = torch.load(oakink_object_pcs_path)
+            self.oakink_object_pcs = torch.load(oakink_object_pcs_path)
 
-            self.category_intent_to_entries = defaultdict(lambda: defaultdict(list))
+        # Create metadata dict
+        self.category_intent_to_entries = {}
 
-            for entry in self.metadata:
+        if self.oakink_metadata:
+            for entry in self.oakink_metadata:
                 object_key = entry[5]  
                 intent = entry[4]      
                 object_name = object_key.split('+')[1] 
+                
+                if object_name not in self.category_intent_to_entries:
+                    self.category_intent_to_entries[object_name] = {}
+                
+                if intent not in self.category_intent_to_entries[object_name]:
+                    self.category_intent_to_entries[object_name][intent] = []
+                
                 self.category_intent_to_entries[object_name][intent].append(entry)
 
-        elif dataset_name == 'combine':
-            raise ValueError("Dataset name 'combine' is no longer supported. Please use 'oakink' or 'cmap' instead.")
-        else:
-            raise ValueError(f"Invalid dataset name: {dataset_name}")
-
+        # Metadata Robot
         self.metadata_robots = {}
-        self.metadata_robots_objects = defaultdict(lambda: defaultdict(list))
+        self.metadata_robots_objects = {}
 
         for robot_name in self.robot_names:
-            if dataset_name == 'oakink':
-                metadata_robot = [m for m in self.metadata if m[6] == robot_name]
-            elif dataset_name == 'cmap':
-                metadata_robot = [(m[0], m[1]) for m in self.metadata if m[2] == robot_name]
-
+            if robot_name == 'mano':
+                metadata_robot = [m for m in self.oakink_metadata if m[6] == robot_name]
+            elif 'retarget' in robot_name:
+                metadata_robot = [m for m in self.oakink_metadata if m[6] == robot_name.split('_')[1]]
+            else:
+                metadata_robot = [(m[0], m[1]) for m in self.cmap_metadata if m[2] == robot_name]
             self.metadata_robots[robot_name] = metadata_robot
-            print(f"Robot split: {robot_name} has {len(metadata_robot)} samples")
+
+            self.metadata_robots_objects[robot_name] = {}
 
             for entry in metadata_robot:
-                if dataset_name == 'oakink':
+                if robot_name == "mano" or "retarget" in robot_name:
                     object_id = entry[7]
-                elif dataset_name == 'cmap':
+                else:
                     object_id = entry[1]
-                self.metadata_robots_objects[robot_name][object_id].append(entry)            
+                if object_id not in self.metadata_robots_objects[robot_name]:
+                    self.metadata_robots_objects[robot_name][object_id] = []
+                self.metadata_robots_objects[robot_name][object_id].append(entry)                
+
+        # Combine object_pcs
+        self.object_pcs = {}
+        if dataset_name == 'cmap' or dataset_name == 'combine':
+            self.object_pcs.update(self.cmap_object_pcs)
+        if dataset_name == 'oakink' or dataset_name == 'combine':
+            self.object_pcs.update(self.oakink_object_pcs)
 
         # Load object intent embeddings
         self.object_intent_embeddings = torch.load(os.path.join(self.ROOT_DIR, 'data/OakInkDataset/clip_object_intent_embeddings.pt'))        
 
-        print(f"CombineDataset: {len(self)} samples (Batch)")
-        print(f"CombineDataset: {len(self.metadata)} samples")
+        print(f"CombineDataset: {len(self)} samples")
+        print(f"CombineDataset: {len(self.oakink_metadata)} oakink samples")
+        print(f"CombineDataset: {len(self.cmap_metadata)} cmap samples")
 
     def __getitem__(self, index):
         """
@@ -366,42 +355,63 @@ class CombineDataset(Dataset):
             dro_gt_batch = None
             robot_pc_target_batch = None
 
+        if self.use_dro and self.provide_pc:
+            wrist_dro_gt_batch = []
+            robot_pc_wrist_target_batch = []
+        else:
+            wrist_dro_gt_batch = None
+            robot_pc_wrist_target_batch = None
+
         if self.provide_pc:
             robot_pc_nofix_initial_batch = []
+            cross_pc_target_batch = []
         else:
             robot_pc_nofix_initial_batch = None
+            cross_pc_target_batch = None
 
         initial_q_batch = []
         nofix_initial_q_batch = []
         target_q_batch = []
+        wrist_target_q_batch = []
         intent_batch = []
         language_embedding_batch = []
         object_pc_batch = []
-        object_pc_512_batch = []
+        object_pc_ddpm_batch = []
+        cross_object_batch = []
         complex_language_embedding_batch = []
         complex_language_sentence_batch = []
         complex_language_embedding_clip_512_batch = []
         complex_language_embedding_clip_768_batch = []
         complex_language_embedding_openai_256_batch = []
         
-        batch_robot_data = []
-        if self.mode == 'train':
-            robot_names = calculate_robot_counts(self.batch_size, self.robot_ratio)
-            for idx, robot_name in enumerate(robot_names):
-                batch_robot_data.append(random.choice(self.metadata_robots[robot_name]))
-        else:
-            start_idx = index * self.batch_size
-            end_idx = min(start_idx + self.batch_size, len(self.metadata))
-            batch_robot_data = self.metadata[start_idx:end_idx]
+        robot_names = calculate_robot_counts(self.batch_size, self.robot_ratio)
+        # choose_object_name = random.choice(list(self.metadata_robots_objects[robot_names[0]]))
+        # print(f"Choose Object: {choose_object_name}")
 
-        for idx, robot_data in enumerate(batch_robot_data):
+        for idx, robot_name in enumerate(robot_names):
 
-            if self.dataset_name == 'oakink':
-                hand_pose, hand_shape, tsl, target_q, intent, object_name, robot_name, object_id, scale_factor, hand_verts, complex_sentence, complex_embedding_clip_768,  complex_embedding_openai_256, complex_embedding_clip_512 = robot_data
+            if self.fix_sample:
+                robot_name = "retarget_shadowhand" 
+                s_idx = 0
 
-                scale_factor = float(scale_factor)
+            robot_name_batch.append(robot_name)
+            hand: HandModel = self.hands[robot_name]
+            # print(robot_name + " " + choose_object_name)
+            # metadata_robot = self.metadata_robots_objects[robot_name][choose_object_name]
+            metadata_robot = self.metadata_robots[robot_name]
+
+            if robot_name == 'mano' or 'retarget' in robot_name:
+                # metadata_robot = [m for m in self.oakink_metadata if m[6] == robot_name]
+                if self.fix_sample:
+                    hand_pose, hand_shape, tsl, target_q, intent, object_name, _, object_id, _, hand_verts, complex_sentence, complex_embedding_clip_768, complex_embedding_openai_256, complex_embedding_clip_512 = metadata_robot[s_idx]
+                    s_idx += 1
+                else:
+                    hand_pose, hand_shape, tsl, target_q, intent, object_name, _, object_id, _, hand_verts, complex_sentence, complex_embedding_clip_768,  complex_embedding_openai_256, complex_embedding_clip_512 = random.choice(metadata_robot)
+
+                cross_data = random.choice(self.category_intent_to_entries[object_name.split('+')[1]][intent])
                 language_embedding = self.object_intent_embeddings[object_name][intent]
                 intent = INTENT_MAP[intent]
+                _, _, _, _, _, cross_object_name, _, cross_object_id, _, cross_hand_verts, _, _, _, _ = cross_data
 
                 if self.complex_language_type == 'clip_768':
                     complex_embedding = complex_embedding_clip_768
@@ -418,27 +428,47 @@ class CombineDataset(Dataset):
                 complex_language_embedding_openai_256_batch.append(complex_embedding_openai_256)
                 complex_language_embedding_clip_512_batch.append(complex_embedding_clip_512)
             else:
-                scale_factor = 1.0
-                target_q, object_name = robot_data
+                # metadata_robot = [(m[0], m[1]) for m in self.cmap_metadata if m[2] == robot_name]
+                # >>> Debug Only >>>
+                target_q, object_name = random.choice(metadata_robot)
+                # target_q, object_name = metadata_robot[0]
+                # # <<< End Debug <<<
                 object_id = None
                 language_embedding = self.object_intent_embeddings[object_name]['hold']
                 intent = INTENT_MAP['hold']              
 
-            hand = self.hands[robot_name]
+            target_q_batch.append(target_q)
+            object_name_batch.append(object_name)
 
-            if self.dataset_name == 'oakink':
+            if robot_name == 'mano':
+                robot_links_pc_batch.append(None)
+                object_id_batch.append(object_id)
+            elif 'retarget' in robot_name:
                 robot_links_pc_batch.append(hand.links_pc)
                 object_id_batch.append(object_id)
             else:
                 robot_links_pc_batch.append(hand.links_pc)
                 object_id_batch.append(None)
 
-            target_q_batch.append(target_q)
-            robot_name_batch.append(robot_name)
-            object_name_batch.append(object_name)
+            # Add original object
+            object_pc = self._get_object_pc(object_name, object_id, robot_name)
+            object_pc_ddpm = self._get_object_pc(object_name, object_id, robot_name, 2048)
 
-            object_pc = self._get_object_pc(object_name, object_id, scale_factor=scale_factor)
-            object_pc_512 = self._get_object_pc(object_name, object_id, 512, scale_factor)
+            # Add initial and target robot pc
+            # if robot_name == 'mano':
+            #     robot_pc_target, _ = hand.get_mano_pc_from_verts(torch.tensor(hand_verts))
+            #     robot_pc_target_batch.append(robot_pc_target)
+            #     # target_q_batch.append(target_q)
+            #     target_q_batch.append(None)
+
+            #     initial_q = hand.get_fixed_initial_q()
+            #     nofix_initial_q = hand.get_initial_q(target_q)
+
+            #     # initial_q_batch.append(initial_q)
+            #     initial_q_batch.append(None)
+            #     robot_pc_initial, _ = hand.get_mano_pc(initial_q, tsl, hand_pose.unsqueeze(0), hand_shape.unsqueeze(0))
+            #     robot_pc_initial_batch.append(robot_pc_initial)
+            # else:
 
             initial_q = self.robot_fix_initial_q[robot_name]
             initial_q_batch.append(initial_q)
@@ -446,54 +476,93 @@ class CombineDataset(Dataset):
             nofix_initial_q = hand.get_initial_q(target_q)
             nofix_initial_q_batch.append(nofix_initial_q)
 
+            wrist_target_q = torch.cat([target_q[:6], initial_q[6:]])
+            wrist_target_q_batch.append(wrist_target_q)
+
             robot_pc_initial = self.robot_fix_initial_q_pc[robot_name]
             robot_pc_initial_batch.append(robot_pc_initial)
             
             if self.use_dro:
                 robot_pc_target = hand.get_transformed_links_pc(target_q, only_palm=self.only_palm)[:, :3]
                 robot_pc_target_batch.append(robot_pc_target)
-                dro = torch.cdist(robot_pc_target, object_pc, p=2)
-                dro_gt_batch.append(dro)
+
+                if self.provide_pc:
+                    robot_pc_wrist_target = hand.get_transformed_links_pc(wrist_target_q)[:, :3]
+                    robot_pc_wrist_target_batch.append(robot_pc_wrist_target)
 
             if self.provide_pc:
                 robot_pc_nofix_initial = hand.get_transformed_links_pc(nofix_initial_q, only_palm=self.only_palm)[:, :3]
                 robot_pc_nofix_initial_batch.append(robot_pc_nofix_initial)
 
+            if robot_name == 'mano':
+                cross_pc_target, _ = hand.get_mano_pc_from_verts(torch.tensor(cross_hand_verts))
+            else:
+                if self.provide_pc:
+                    cross_pc_target = hand.get_transformed_links_pc(target_q, only_palm=self.only_palm)[:, :3]
+                    cross_pc_target_batch.append(cross_pc_target)
+
+                # this makes DRO object use the same object as the origin object
+                cross_object_name = object_name 
+                cross_object_id = object_id
+
+            cross_object_pc = self._get_object_pc(cross_object_name, cross_object_id, robot_name)
+                
+            if self.use_dro:    
+                dro = torch.cdist(robot_pc_target, object_pc, p=2)
+                dro_gt_batch.append(dro)
+
+            if self.provide_pc and self.use_dro:
+                wrist_dro = torch.cdist(robot_pc_wrist_target, object_pc, p=2)
+                wrist_dro_gt_batch.append(wrist_dro)
+
             intent_batch.append(intent)
             object_pc_batch.append(object_pc)
-            object_pc_512_batch.append(object_pc_512)
+            object_pc_ddpm_batch.append(object_pc_ddpm)
+            cross_object_batch.append(cross_object_pc)
             language_embedding_batch.append(language_embedding)
 
+
         if self.provide_pc:
+            robot_pc_target_batch = torch.stack(robot_pc_target_batch)
             robot_pc_nofix_initial_batch = torch.stack(robot_pc_nofix_initial_batch)
+            robot_pc_wrist_target_batch = torch.stack(robot_pc_wrist_target_batch)
+            cross_pc_target_batch = torch.stack(cross_pc_target_batch)
 
         if self.use_dro:
-            robot_pc_target_batch = torch.stack(robot_pc_target_batch)
             dro_gt_batch = torch.stack(dro_gt_batch)
+
+        if self.use_dro and self.provide_pc:
+            wrist_dro_gt_batch = torch.stack(wrist_dro_gt_batch)
         
         intent_batch = torch.tensor(intent_batch, dtype=torch.int).reshape(-1, 1)
         object_pc_batch = torch.stack(object_pc_batch)
-        object_pc_512_batch = torch.stack(object_pc_512_batch)
+        object_pc_ddpm_batch = torch.stack(object_pc_ddpm_batch)
+        cross_object_batch = torch.stack(cross_object_batch)
         language_embedding_batch = torch.stack(language_embedding_batch)
         robot_pc_initial_batch = torch.stack(robot_pc_initial_batch)
 
-        if len(complex_language_embedding_batch) == len(batch_robot_data):
+        # nofix_initial_q_batch = torch.stack(nofix_initial_q_batch)
+        # initial_q_batch = torch.stack(initial_q_batch)
+        # target_q_batch = torch.stack(target_q_batch)
+
+        B, N = self.batch_size, self.num_points
+
+        if len(complex_language_embedding_batch) == B:
             complex_language_embedding_batch = torch.stack(complex_language_embedding_batch)
             complex_language_embedding_clip_768_batch = torch.stack(complex_language_embedding_clip_768_batch)
             complex_language_embedding_openai_256_batch = torch.stack(complex_language_embedding_openai_256_batch)
             complex_language_embedding_clip_512_batch = torch.stack(complex_language_embedding_clip_512_batch)
-
-        B = len(batch_robot_data)
-        N = self.num_points
+        # else:
+            # print("Include non-oakink data, cannot stack complex language embedding")
 
         # assert robot_pc_initial_batch.shape == (B, N, 3),\
         #     f"Expected: {(B, N, 3)}, Actual: {robot_pc_initial_batch.shape}"
         # assert robot_pc_target_batch.shape == (B, N, 3),\
         #     f"Expected: {(B, N, 3)}, Actual: {robot_pc_target_batch.shape}"
         # assert object_pc_batch.shape == (B, N, 3),\
-            # f"Expected: {(B, N, 3)}, Actual: {object_pc_batch.shape}"
+        #     f"Expected: {(B, N, 3)}, Actual: {object_pc_batch.shape}"
         # assert dro_gt_batch.shape == (B, N, N),\
-            # f"Expected: {(B, N, N)}, Actual: {dro_gt_batch.shape}"
+        #     f"Expected: {(B, N, N)}, Actual: {dro_gt_batch.shape}"
 
         initial_q_batch = initial_q_batch if self.use_fixed_initial_q else nofix_initial_q_batch
         robot_pc_initial_batch = robot_pc_initial_batch if self.use_fixed_initial_q else robot_pc_nofix_initial_batch
@@ -505,12 +574,17 @@ class CombineDataset(Dataset):
             'robot_links_pc': robot_links_pc_batch,  # list(len = B): dict, {link_name: (N_link, 3)}
             'robot_pc_initial': robot_pc_initial_batch,
             'robot_pc_target': robot_pc_target_batch,
+            'robot_pc_wrist_target': robot_pc_wrist_target_batch,
+            'cross_pc_target': cross_pc_target_batch,
+            'cross_object_pc': cross_object_batch,
             'language_embedding': language_embedding_batch,
             'object_pc': object_pc_batch,
-            'object_pc_512': object_pc_512_batch,
+            'object_pc_ddpm': object_pc_ddpm_batch,
             'dro_gt': dro_gt_batch,
+            'wrist_dro_gt': wrist_dro_gt_batch,
             'initial_q': initial_q_batch,
             'target_q': target_q_batch,
+            'wrist_target_q': wrist_target_q_batch,
             'intent': intent_batch,
             'complex_language_embedding': complex_language_embedding_batch,
             'complex_language_embedding_clip_512': complex_language_embedding_clip_512_batch,
@@ -520,25 +594,25 @@ class CombineDataset(Dataset):
         }
 
     def __len__(self):
-        return math.ceil(len(self.metadata) / self.batch_size)
+        return math.ceil((len(self.cmap_metadata)+len(self.oakink_metadata)) / self.batch_size)
 
         
-    def _get_object_pc(self, object_name, object_id=None, num_points=None, scale_factor=1.0):
+    def _get_object_pc(self, object_name, object_id, robot_name, num_points=None):
         if num_points is None:
             num_points = self.num_points
         if self.object_pc_type == 'fixed':
             name = object_name.split('+')
-            object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}/{object_id}.pt') if object_id is not None \
+            object_path = os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}/{object_id}.pt') if (robot_name == 'mano' or "retarget" in robot_name) \
             else os.path.join(ROOT_DIR, f'data/PointCloud/object/{name[0]}/{name[1]}.pt')
             object_pc = torch.load(object_path)[:, :3]
         elif self.object_pc_type == 'random':
             indices = torch.randperm(65536)[:num_points]
-            object_pc = self.object_pcs[object_id][indices] if object_id is not None \
+            object_pc = self.object_pcs[object_id][indices] if (robot_name == 'mano' or "retarget" in robot_name) \
             else self.object_pcs[object_name][indices]
             object_pc += torch.randn(object_pc.shape) * 0.002
         else:  # 'partial', remove 50% points
             indices = torch.randperm(65536)[:num_points * 2]
-            object_pc = self.object_pcs[object_id][indices] if object_id is not None \
+            object_pc = self.object_pcs[object_id][indices] if (robot_name == 'mano' or "retarget" in robot_name) \
             else self.object_pcs[object_name][indices]
             direction = torch.randn(3)
             direction = direction / torch.norm(direction)
@@ -546,7 +620,8 @@ class CombineDataset(Dataset):
             _, indices = torch.sort(proj)
             indices = indices[num_points:]
             object_pc = object_pc[indices]
-        return object_pc * scale_factor
+
+        return object_pc
 
 
 def calculate_robot_counts(batch_size, robot_ratio):
@@ -573,6 +648,10 @@ def calculate_robot_counts(batch_size, robot_ratio):
     for robot, count in counts.items():
         robots_num.extend([robot] * count)
     random.shuffle(robots_num)
+
+    # print(f"Expected Robot Counts: {expected_counts}")
+    # print(f"Allocated Robot Counts: {counts}")
+    # print(f"Final Robot Counts: {robots_num}")
     
     return robots_num
 
@@ -580,15 +659,17 @@ def custom_collate_fn(batch):
     return batch[0]
 
 
-def create_dataloader(cfg, mode, fixed_initial_q=False):
+def create_dataloader(cfg, is_train, fix_sample=False, fixed_initial_q=False):
 
+    print(f"Creating dataloader: complex_language_type={cfg.complex_language_type}")
     dataset = CombineDataset(
         batch_size=cfg.batch_size,
         robot_names=cfg.robot_names,
-        mode=mode,
+        is_train=is_train,
         debug_object_names=cfg.debug_object_names,
         object_pc_type=cfg.object_pc_type,
         data_ratio=cfg.ratio,
+        fix_sample=fix_sample,
         fixed_initial_q=fixed_initial_q,
         complex_language_type=cfg.complex_language_type,
         dataset_name=cfg.dataset_name,
@@ -599,6 +680,6 @@ def create_dataloader(cfg, mode, fixed_initial_q=False):
         batch_size=1,
         collate_fn=custom_collate_fn,
         num_workers=cfg.num_workers,
-        shuffle=(mode=='train'),
+        shuffle=is_train
     )
     return dataloader

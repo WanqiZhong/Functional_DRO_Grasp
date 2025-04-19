@@ -96,7 +96,8 @@ def correct_shadowhand_wrist(robot_pose, wrj1_angle=0.0, wrj2_angle=0.0):
 # Configuration
 # Change these paths to match your dataset locations
 # ORIGINAL_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand.pt'
-CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_bodex.pt'
+# CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_bodex.pt'
+CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_teapot_retarget_to_shadowhand_no_valid_dro.pt'
 # CONVERTED_DATASET_PATH = '/data/zwq/code/BODex/sim_shadow/fc/oakink_teapot/graspdata/combined_results.pt'
 
 # ORIGINAL_DATASET_PATH = os.path.join(ROOT_DIR, '/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_shadowhand.pt')

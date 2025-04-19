@@ -1,5 +1,7 @@
 import torch
 from scipy.spatial.transform import Rotation
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 def matrix_to_euler(matrix):
     device = matrix.device
@@ -52,8 +54,6 @@ def quaternion_to_euler(quaternion):
     euler = Rotation.from_quat(quaternion.cpu().numpy()).as_euler('XYZ')
     return torch.tensor(euler, dtype=torch.float32, device=device)
 
-
-
 def normalize(v):
     return v / torch.norm(v, dim=-1, keepdim=True)
 
@@ -62,6 +62,40 @@ def q_euler_to_q_rot6d(q_euler):
 
 def q_rot6d_to_q_euler(q_rot6d):
     return torch.cat([q_rot6d[..., :3], rot6d_to_euler(q_rot6d[..., 3:9]), q_rot6d[..., 9:]], dim=-1)
+
+def rotation_matrix_z(angle_rad):
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+    return np.array([
+        [cos_a, -sin_a, 0],
+        [sin_a, cos_a, 0],
+        [0, 0, 1]
+    ])
+
+def rotation_matrix_y(angle_rad):
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+    return np.array([
+        [cos_a, 0, sin_a],
+        [0, 1, 0],
+        [-sin_a, 0, cos_a]
+    ])
+
+def rotation_matrix_x(angle_rad):
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+    return np.array([
+        [1, 0, 0],
+        [0, cos_a, -sin_a],
+        [0, sin_a, cos_a]
+    ])
+
+def transform_matrix(translation, rotation_matrix):
+    transform = np.eye(4)
+    transform[:3, :3] = rotation_matrix
+    transform[:3, 3] = translation
+    return transform
+
 
 
 if __name__ == '__main__':

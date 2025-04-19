@@ -2,25 +2,29 @@ import os
 import viser
 import trimesh
 import numpy as np
+import re
 
-OBJECT_DIR = "/data/zwq/code/MeshProcess"
-DIR_1 = "/data/zwq/code/DexGraspBench/output/dro_eval_500_early_version_shadow_custom/vis_obj/"
-DIR_2 = "/data/zwq/code/DexGraspBench/output/dro_eval_500_early_version_shadow_multiple/vis_obj/"
-DIR_3 = "/data/zwq/code/DexGraspBench/output/dro_eval_500_shadow_custom/vis_obj/"
-DIR_4 = "/data/zwq/code/DexGraspBench/output/dro_eval_500_shadow_multiple/vis_obj/"
-DIR_5 = "/data/zwq/code/DexGraspBench/output/diffusion_eval_500_shadow_custom/vis_obj/"
+DIR_1 = "/data/zwq/code/DexGraspBench/output/oakink_bodex_allegro_bodex/vis_obj/"
+DIR_5 = "/data/zwq/code/DexGraspBench/output/oakink_multi_teapot_step_01_max_shadow_bodex/vis_obj/"
+DIR_2 = "/data/zwq/code/DexGraspBench/output/oakink_multi_teapot_step_005_max_shadow_bodex/vis_obj/"
+DIR_3 = "/data/zwq/code/DexGraspBench/output/oakink_multi_teapot_step_001_max_shadow_bodex/vis_obj/"
+DIR_4 = "/data/zwq/code/DexGraspBench/output/oakink_multi_teapot_no_bodex_shadow_custom/vis_obj/"
 DIR_6 = "/data/zwq/code/DexGraspBench/output/diffusion_eval_500_shadow_multiple/vis_obj/"
 
 # Set comparison items directly in the code
-item1 = "DRO_Early_Custom"
-item2 = "DRO_Early_Multiple"
-item3 = "DRO_Custom"
-item4 = "DRO_Multiple"
-item5 = "Diffusion_Custom"
-item6 = "Diffusion_Multiple"
+# item1 = "Step_0.1"
+# item2 = "Step_0.05"
+# item3 = "Step_0.01"
+# item4 = "Origin"
+item1 = "Data"
+item2 = None
+item3 = None
+item4 = None
+item5 = None
+item6 = None
 
 TMP_DIR = "/data/zwq/code/Visualize/"
-copy_flag = True
+copy_flag = False
 # Copy the select data file (.npy) to new folder, named as the item name
 def copy_select_file(object_name, src_file, item_name, suffix=".npy"):
     dst_dir = os.path.join(TMP_DIR, object_name)
@@ -29,10 +33,7 @@ def copy_select_file(object_name, src_file, item_name, suffix=".npy"):
     dst_file = os.path.join(dst_dir, item_name + suffix)
     if os.path.exists(dst_file):
         os.remove(dst_file)
-    if suffix == "":
-        os.system(f"cp -r {src_file} {dst_dir}")
-    else:
-        os.system(f"cp {src_file} {dst_file}")
+    os.system(f"cp {src_file} {dst_file}")
 
 def main():
     server = viser.ViserServer(host='127.0.0.1', port=8080)
@@ -163,8 +164,18 @@ def main():
         if item4:   
             try:
                 path_4 = os.path.join(DIR_4, pair_info['full_path'], pair_info['grasp_file'])
+                if not os.path.exists(path_4):
+                    pattern = r"(.*?/vis_obj/)(o\d+)/(scale100_pose000_(\d+))/0_grasp_0\.obj"
+                    match = re.match(pattern, path_4)
+                    if match:
+                        base, obj_id, _, index_str = match.groups()
+                        index = int(index_str)
+                        new_index = index - 1
+                        path_4 = f"{base}teapot/{obj_id}/{new_index}_grasp_0.obj"
+                        print(f"Updated path_4 to: {path_4}")
                 mesh_4 = trimesh.load_mesh(path_4)
-                data_4_path = os.path.join(DIR_4.split('vis_obj/')[0], 'evaluation', pair_info['full_path'], pair_info['grasp_file'].split('_grasp_0.obj')[0] + '.npy')
+                data_4_path = path_4.replace('vis_obj/', 'evaluation/').replace('_grasp_0.obj', '.npy')
+                # data_4_path = os.path.join(DIR_4.split('vis_obj/')[0], 'evaluation', pair_info['full_path'], pair_info['grasp_file'].split('_grasp_0.obj')[0] + '.npy')
                 print(f"Loaded {item4} data: {data_4_path}")
                 data_4 = np.load(data_4_path, allow_pickle=True).item()
                 succ_4 = data_4['succ_flag']
@@ -241,6 +252,8 @@ def main():
         try:
             obj_path = os.path.join(DIR_1, pair_info['full_path'], pair_info['obj_file'])
             obj_mesh = trimesh.load_mesh(obj_path)
+            # scale_factor = data_1['obj_scale'] if 'obj_scale' in data_1 else 1.0
+            # obj_mesh = obj_mesh.apply_scale(scale_factor)
             server.scene.add_mesh_simple(
                 'obj_mesh',
                 obj_mesh.vertices,
@@ -248,8 +261,7 @@ def main():
                 color=(239, 132, 167),  # Pink
                 opacity=1.0
             )
-            object_info_path = os.path.join(OBJECT_DIR, data_1['obj_path'])
-            copy_select_file(f"{current_object_name}_{current_object_id}", object_info_path, "object", "")
+            copy_select_file(f"{current_object_name}_{current_object_id}", obj_path, "object", ".obj")
             print(f"Successfully loaded object mesh: {obj_path}")
         except Exception as e:
             print(f"Error loading object mesh: {e}")

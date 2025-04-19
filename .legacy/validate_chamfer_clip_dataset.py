@@ -8,8 +8,9 @@ from chamfer_distance import ChamferDistance as chamfer_dist
 from utils.hand_model import create_hand_model
 from utils.multilateration import multilateration
 from utils.se3_transform import compute_link_pose
+from data_utils.CombineRetargetDatasetMulti import create_dataloader
 from utils.optimization import *
-from model.network import create_network_larger_transformer_clip_add_dgcnn
+from model.network import create_network_larger_transformer_clip_add_dgcnn_acc
 import hydra
 from tqdm import tqdm
 
@@ -30,7 +31,7 @@ def _get_object_pc(object_name, object_id, robot_name):
     object_pc = torch.load(object_path)[:, :3]
     return object_pc
 
-@hydra.main(version_base="1.2", config_path="configs", config_name="validate_clip_512_add_dgcnn")
+@hydra.main(version_base="1.2", config_path="configs", config_name="validate_clip_512_add_dgcnn_acc")
 def main(cfg):
     print("******************************** [Config] ********************************")    
     device = torch.device(f'cuda:{cfg.gpu}' if torch.cuda.is_available() else 'cpu')
@@ -45,47 +46,36 @@ def main(cfg):
     with open(log_file_name, 'a') as f:
         print(f"************************ Validating epoch {validate_epoch} ************************", file=f)
 
-    network = create_network_larger_transformer_clip_add_dgcnn(cfg.model, mode='validate').to(device)
+    network = create_network_larger_transformer_clip_add_dgcnn_acc(cfg.model, mode='validate').to(device)
     network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device), strict=False)
     network.eval()
 
-    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-03-16_23-38-46_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-20_23-53-15/res_diffuser_500.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-04-13_17-25-08_oakink_rotmat_custom_robot_pn2_object_pn2_three_split_ss_shadow/eval/final_validate_data/2025-04-14_20-23-14/res_diffuser_k3.pkl"
-
-    results = load_results(result_path)['results']
-    print(f"Loading results from: {result_path}")
-    print(f"Total samples: {len(results)}")
+    dataloader = create_dataloader(cfg.dataset, is_train=False, fixed_initial_q=False)
 
     chamfer_list = []
+    results = []
     robot_name = 'shadowhand'
     hand = create_hand_model(robot_name.split('_')[1] if "retarget" in robot_name else robot_name, device)
 
+    max_length = 500
+    count = 0
 
-    for idx, data in enumerate(tqdm(results)):
+    for idx, data in enumerate(tqdm(dataloader.dataset)):
+
+        if count >= max_length:
+            break
 
         initial_q = hand.get_fixed_initial_q()
-        if "all" not in result_path:
-            initial_q = torch.cat([data['ddpm_qpos'][0].float().to(device), initial_q[6:]])
-        else:
-            initial_q = torch.cat([data['ddpm_qpos'][0].float()[:6].to(device), initial_q[6:]])
-        initial_q = initial_q.unsqueeze(0)
+        initial_q = torch.cat([data['initial_q'][0].float()[:6].to(device), initial_q[6:]]).unsqueeze(0)
 
         robot_pc_initial = hand.get_transformed_links_pc(initial_q)[..., :3].unsqueeze(0).to(device)
-
-        object_pc = _get_object_pc(
-            data['object_name'][0], 
-            data['object_id'][0], 
-            data['robot_name'][0]
-        ).to(device).unsqueeze(0)
-
-        language_emb = data.get('complex_language_embedding_openai_256', data.get('complex_openai_embedding')).to(device) if data.get('complex_language_embedding_openai_256') is not None else data.get('complex_openai_embedding').to(device)
+        object_pc = data['object_pc'].to(device)
 
         with torch.no_grad():
             dro = network(
                 robot_pc_initial,
                 object_pc,
                 language_emb=data['complex_language_embedding_clip_512'].to(device)
-                # language_emb=data['complex_openai_embedding'].to(device)
             )['dro'].detach()
 
         mlat_pc = multilateration(dro, object_pc)
@@ -96,7 +86,6 @@ def main(cfg):
         predict_q = optimization(hand.pk_chain, layer, initial_q, optim_transform)
 
         data['predict_q'] = predict_q.cpu()
-        data['ddpm_initial_q'] = initial_q.cpu()
 
         pred_pts = hand.get_transformed_links_pc(predict_q)[..., :3].unsqueeze(0).to(device)
         gt_q = data['target_q'][0].unsqueeze(0).to(device)
@@ -109,13 +98,14 @@ def main(cfg):
         chamfer_list.append(chamfer_value)
 
         data['chamfer_value'] = chamfer_value
+        results.append(data)
 
-        print(f"Processed sample {idx+1}/{len(results)}, Chamfer distance: {chamfer_value}")
-
+        print(f"Processed sample {idx+1}/{max_length}, Chamfer distance: {chamfer_value}")
+        count += 1
     average_chamfer = sum(chamfer_list) / len(chamfer_list) if chamfer_list else float('nan')
-    print(f"Average Chamfer Distance over {len(results)} samples: {average_chamfer}")
+    print(f"Average Chamfer Distance over {max_length} samples: {average_chamfer}")
 
-    new_result_path = os.path.join(os.path.dirname(result_path), f"res_diffuser_dro_predict_q.pkl")
+    new_result_path = os.path.join(f"output/{cfg.name}/res_diffuser_dro_predict_q.pkl")
     with open(new_result_path, 'wb') as f:
         pickle.dump({'results': results}, f)
     print(f"Updated results with predict_q saved to: {new_result_path}")

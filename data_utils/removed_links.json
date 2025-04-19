@@ -6,5 +6,8 @@
     "shadowhand": ["forearm", "wrist", "ffknuckle", "mfknuckle", "rfknuckle", "lfknuckle", "thbase"],
     "retarget_shadowhand": ["forearm", "wrist", "ffknuckle", "mfknuckle", "rfknuckle", "lfknuckle", "thbase"],
     "test_shadowhand": [],    
-    "leaphand": []
+    "leaphand": [],
+    "leaphand_bodex": [],
+    "allegro_bodex": [],
+    "shadowhand_bodex":  ["forearm", "wrist", "ffknuckle", "mfknuckle", "rfknuckle", "lfknuckle", "thbase"]
 }

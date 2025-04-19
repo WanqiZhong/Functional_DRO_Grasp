@@ -1,6 +1,6 @@
 defaults:
     - language_model.yaml
-    - dataset: mix_retarget_dataset.yaml
+    - dataset: mix_retarget_dataset_all.yaml
     - _self_
 
 model:  # override model.yaml

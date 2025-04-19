@@ -93,11 +93,13 @@ class TrainingModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, visualize=False):
         robot_names = batch['robot_name']  
+        object_names = batch['object_name']
+
         mano_mask = [robot_name == 'mano' for robot_name in robot_names]
         mano_mask = torch.tensor(mano_mask)
         cmap_mask = [robot_name != 'mano' for robot_name in robot_names]
         cmap_mask = torch.tensor(cmap_mask)
-        retarget_mask = ['retarget' in robot_name for robot_name in robot_names]
+        retarget_mask = [object_name.split('+')[0] == 'oakink' for object_name in object_names]
         retarget_mask = torch.tensor(retarget_mask)
 
         intent = batch['intent'] if 'intent' in batch else None
@@ -105,19 +107,12 @@ class TrainingModule(pl.LightningModule):
         robot_links_pc = batch['robot_links_pc']
         robot_pc_initial = batch['robot_pc_initial']
         robot_pc_target = batch['robot_pc_target']
-        robot_pc_wrist_target = batch['robot_pc_wrist_target']
 
         object_pc = batch['object_pc']
         dro_gt = batch['dro_gt']
-        wrist_dro_gt = batch['wrist_dro_gt'] 
+        
         # language_embedding = batch['language_embedding']
-        retrieve_hand_pc_target = batch['cross_pc_target']
-        retrieve_object_pc = batch['cross_object_pc']
         language_embedding = batch['complex_language_embedding']
-
-        if self.cfg.two_stage and self.epoch_idx < 50:
-            robot_pc_target = robot_pc_wrist_target
-            dro_gt = wrist_dro_gt
 
         # Visualize
         if visualize:
@@ -132,44 +127,13 @@ class TrainingModule(pl.LightningModule):
                 title="Combined Point Clouds"
             )
 
-            point_clouds = [retrieve_hand_pc_target[0], retrieve_object_pc[0]]
-            labels = ['Cross Hand Point Cloud', 'Cross Object Point Cloud']
-            colors = ['r', 'g']
-
-            visualize_point_clouds(
-                point_clouds=point_clouds,
-                labels=labels,
-                colors=colors,
-                title="Additional Point Clouds"
-            )
-
-        if self.cfg.cross_hand:
-              # contain human or robot hand pc
-            if self.cfg.cross_object:
-                network_output = self.network(
-                    robot_pc_initial,
-                    object_pc,
-                    target_pc = retrieve_hand_pc_target,
-                    cross_object_pc = retrieve_object_pc,
-                    intent = intent,
-                    language_emb = language_embedding,
-                )
-            else:   
-                network_output = self.network(
-                    robot_pc_initial,
-                    object_pc,
-                    target_pc = retrieve_hand_pc_target,
-                    intent = intent,
-                    language_emb = language_embedding
-                )
-        else:
-            network_output = self.network(
-                robot_pc_initial,
-                object_pc,
-                target_pc = robot_pc_target,
-                intent = intent,
-                language_emb = language_embedding
-            )
+        network_output = self.network(
+            robot_pc_initial,
+            object_pc,
+            target_pc = robot_pc_target,
+            intent = intent,
+            language_emb = language_embedding
+        )
 
         dro = network_output['dro']
         mu = network_output['mu']

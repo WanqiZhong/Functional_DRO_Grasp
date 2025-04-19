@@ -4,9 +4,14 @@ from collections import defaultdict, Counter
 import os
 import sys 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Base directory path
-base_dir = "/data/zwq/code/DexGraspBench/output/oakink_max_1_new_shadow/succgrasp"
 import torch
+
+# Base directory path
+base_dir = "/data/zwq/code/DexGraspBench/output/oakink_all_allegro_bodex/succgrasp"
+# hand_name = "leaphand"
+hand_name = "allegro"
+output_path = os.path.join(ROOT_DIR, f"data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{hand_name}_valid_bodex.pt")
+
 
 def traverse_and_extract():
     """
@@ -32,6 +37,7 @@ def traverse_and_extract():
                     if 'oakink_item' in data and 'robot_pose' in data:
                         oakink_item = data['oakink_item']
                         robot_pose = data['robot_pose'].cpu()
+                        # print(f"robot_pose: {robot_pose.shape}")
 
                         new_oakink_item = tuple()
                         for i in range(len(oakink_item)):
@@ -41,7 +47,7 @@ def traverse_and_extract():
                                 new_oakink_item += (oakink_item[i],)
                         
                         # Add to metadata list
-                        metadata_entry = [new_oakink_item, robot_pose]
+                        metadata_entry = [new_oakink_item, robot_pose, file_path]
                         metadata.append(metadata_entry)
                         
                         # Extract object information for statistics
@@ -105,7 +111,6 @@ def create_info_dict(object_stats):
 # Process and save the result
 result = traverse_and_extract()
 # Save the result to a file
-output_path = os.path.join(ROOT_DIR, "data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_bodex.pt")
 torch.save(result, output_path)
 print(f"Processed data saved to {output_path}")
 

@@ -9,7 +9,7 @@ from utils.hand_model import create_hand_model
 from utils.multilateration import multilateration
 from utils.se3_transform import compute_link_pose
 from utils.optimization import *
-from model.network import create_network_larger_transformer_clip_add_dgcnn
+from model.network import create_network_larger_transformer_clip_add_dgcnn_acc
 import hydra
 from tqdm import tqdm
 
@@ -30,7 +30,7 @@ def _get_object_pc(object_name, object_id, robot_name):
     object_pc = torch.load(object_path)[:, :3]
     return object_pc
 
-@hydra.main(version_base="1.2", config_path="configs", config_name="validate_clip_512_add_dgcnn")
+@hydra.main(version_base="1.2", config_path="configs", config_name="validate_retarget_language_larger_transformer_clip_512_dgcnn_add_all")
 def main(cfg):
     print("******************************** [Config] ********************************")    
     device = torch.device(f'cuda:{cfg.gpu}' if torch.cuda.is_available() else 'cpu')
@@ -45,12 +45,13 @@ def main(cfg):
     with open(log_file_name, 'a') as f:
         print(f"************************ Validating epoch {validate_epoch} ************************", file=f)
 
-    network = create_network_larger_transformer_clip_add_dgcnn(cfg.model, mode='validate').to(device)
+    # 加载网络模型
+    network = create_network_larger_transformer_clip_add_dgcnn_acc(cfg.model, mode='validate').to(device)
     network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device), strict=False)
     network.eval()
 
-    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-03-16_23-38-46_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-20_23-53-15/res_diffuser_500.pkl"
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-04-13_17-25-08_oakink_rotmat_custom_robot_pn2_object_pn2_three_split_ss_shadow/eval/final_validate_data/2025-04-14_20-23-14/res_diffuser_k3.pkl"
+    # our
+    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-02-17_21-34-30_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-02-19_16-36-29/res_diffuser_100_old.pkl"
 
     results = load_results(result_path)['results']
     print(f"Loading results from: {result_path}")
@@ -96,18 +97,18 @@ def main(cfg):
         predict_q = optimization(hand.pk_chain, layer, initial_q, optim_transform)
 
         data['predict_q'] = predict_q.cpu()
-        data['ddpm_initial_q'] = initial_q.cpu()
 
         pred_pts = hand.get_transformed_links_pc(predict_q)[..., :3].unsqueeze(0).to(device)
         gt_q = data['target_q'][0].unsqueeze(0).to(device)
         gt_pts = hand.get_transformed_links_pc(gt_q)[..., :3].unsqueeze(0).to(device)
+
         try:
             d1, d2, _, _ = chamfer_dist(x=pred_pts, y=gt_pts)
         except:
             d1, d2, _, _ = chamfer_dist()(x=pred_pts, y=gt_pts)
+
         chamfer_value = (d1.sum() + d2.sum()).item()
         chamfer_list.append(chamfer_value)
-
         data['chamfer_value'] = chamfer_value
 
         print(f"Processed sample {idx+1}/{len(results)}, Chamfer distance: {chamfer_value}")

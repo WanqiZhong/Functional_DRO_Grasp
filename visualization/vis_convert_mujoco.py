@@ -12,6 +12,21 @@ import numpy as np
 from utils.hand_model import create_hand_model
 from utils.rotation import quaternion_to_euler
 
+
+# Configuration
+# Change these paths to match your dataset locations
+# ORIGINAL_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand.pt'
+# CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_mujoco.pt'
+
+HAND_NAME = "leaphand"
+ORIGINAL_DATASET_PATH = f'/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_{HAND_NAME}.pt'
+CONVERTED_DATASET_PATH = f'/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_{HAND_NAME}_mujoco.pt'
+
+
+# ORIGINAL_DATASET_PATH = os.path.join(ROOT_DIR, '/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_shadowhand.pt')
+# CONVERTED_DATASET_PATH = os.path.join(ROOT_DIR, '/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_shadowhand_mujoco.pt')
+
+
 def torch_quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
     """Convert rotations given as quaternions to rotation matrices.
 
@@ -93,14 +108,6 @@ def correct_shadowhand_wrist(robot_pose, wrj1_angle=0.0, wrj2_angle=0.0):
     
     return np.concatenate([corrected_position, quat, robot_pose[7:]])
 
-# Configuration
-# Change these paths to match your dataset locations
-ORIGINAL_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand.pt'
-CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_mujoco.pt'
-
-# ORIGINAL_DATASET_PATH = os.path.join(ROOT_DIR, '/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_shadowhand.pt')
-# CONVERTED_DATASET_PATH = os.path.join(ROOT_DIR, '/data/zwq/code/DRO_Grasp/data/OakInkDataset/teapot_oakink_dataset_standard_all_retarget_to_shadowhand_mujoco.pt')
-
 def load_object_mesh(object_key, object_id):
     """Load object mesh based on object key and ID"""
     name = object_key.split('+')
@@ -140,7 +147,7 @@ converted_metadata = converted_data['metadata']
 print(f"Loaded {len(original_metadata)} items from dataset")
 
 # Create hand model
-hand = create_hand_model('shadowhand')
+hand = create_hand_model(HAND_NAME)
 
 # Setup visualization server
 server = viser.ViserServer(host='127.0.0.1', port=8080)
@@ -159,17 +166,28 @@ def on_update(item_idx):
     converted_robot_value = converted_item[3]  # Converted robot value (hand pose)
     object_key = original_item[5]  # e.g., 'oakink+teapot'
     object_id = original_item[7]  # e.g., 'C90001'
+    scale_factor = original_item[8]  
 
-    converted_robot_value = torch.tensor(correct_shadowhand_wrist(converted_robot_value))
-    euler = quaternion_to_euler(torch.cat([converted_robot_value[4:7], converted_robot_value[3:4]]))
-    converted_robot_value = torch.cat([converted_robot_value[:3], euler, torch.tensor([0.0, 0.0]), converted_robot_value[12:], converted_robot_value[7:12]], axis=-1).float()
+    print("Hand Order: ", hand.get_joint_orders())
+    print("Len of hand order: ", len(hand.get_joint_orders()))
+
+    if HAND_NAME == "shadowhand":
+        converted_robot_value = torch.tensor(correct_shadowhand_wrist(converted_robot_value))
+        euler = quaternion_to_euler(torch.cat([converted_robot_value[4:7], converted_robot_value[3:4]]))
+        converted_robot_value = torch.cat([converted_robot_value[:3], euler, torch.tensor([0.0, 0.0]), converted_robot_value[12:], converted_robot_value[7:12]], axis=-1).float()
+    elif HAND_NAME in ["leaphand", "allegro"]:
+        converted_robot_value = torch.tensor(converted_robot_value)
+        euler = quaternion_to_euler(torch.cat([converted_robot_value[4:7], converted_robot_value[3:4]]))
+        converted_robot_value = torch.cat([converted_robot_value[:3], euler, converted_robot_value[7:]], axis=-1).float()
+    else:
+        raise ValueError(f"Unsupported hand model: {HAND_NAME}")
 
     print(f"converted_robot_value aft: {converted_robot_value.shape}")
-    
     print(f"Showing item {item_idx}: {object_key} (ID: {object_id})")
     
     # Get object mesh
     object_trimesh = load_object_mesh(object_key, object_id)
+    object_trimesh = object_trimesh.apply_scale(scale_factor.item())
     if object_trimesh is not None:
         server.scene.add_mesh_simple(
             'object',

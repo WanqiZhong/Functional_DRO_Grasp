@@ -12,7 +12,8 @@ import numpy as np
 from utils.hand_model import create_hand_model
 from utils.rotation import quaternion_to_euler
 
-CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_dro.pt'
+# CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_dro.pt'
+CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_teapot_retarget_to_shadowhand_no_valid_dro.pt'
 
 def load_object_mesh(object_key, object_id):
     """Load object mesh based on object key and ID"""
@@ -92,12 +93,12 @@ def on_update(item_idx, bodex_idx):
         opacity=0.8
     )
 
-    server.scene.add_label(
-        'function',
-        f'{converted_item[10]}',
-        wxyz=(1, 0, 0, 0),
-        position=(1, 1, 1)
-    )
+    # server.scene.add_label(
+    #     'function',
+    #     f'{converted_item[10]}',
+    #     wxyz=(1, 0, 0, 0),
+    #     position=(1, 1, 1)
+    # )
     
 # Add slider to control which item is displayed
 item_slider = server.gui.add_slider(

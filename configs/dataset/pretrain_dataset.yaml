@@ -1,0 +1,7 @@
+robot_names:
+  - 'leaphand'
+  # - 'allegro'
+  # - 'shadowhand'
+
+batch_size: 84
+num_workers: 16
