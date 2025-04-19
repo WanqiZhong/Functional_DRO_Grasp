@@ -294,14 +294,6 @@ class Network_clip_dgcnn(nn.Module):
     def forward(self, robot_pc, object_pc, target_pc=None, intent=None, 
                 visualize=False, cross_object_pc=None, language_emb=None, debug_pc=None):
 
-        if self.cfg.use_intent:
-            assert intent is not None, 'Intent is required when use_intent is True.'
-
-        if self.cfg.use_language:
-            assert language_emb is not None, 'Language embedding is required when use_language is True.'
-
-        assert not self.cfg.use_intent or not self.cfg.use_language, 'Cannot use both intent and language embedding.'
-
         if self.cfg.center_pc:  # zero-mean the robot point cloud
             robot_pc = robot_pc - robot_pc.mean(dim=1, keepdim=True)
 
@@ -312,32 +304,8 @@ class Network_clip_dgcnn(nn.Module):
         if self.cfg.pretrain is not None:
             robot_embedding = robot_embedding.detach()
 
-        assert self.cfg.use_language, 'Must use language embedding.'
-        # CVAE encoder
-        if self.cfg.use_language:
-            z = language_emb
-            mu, logvar = None, None
-            
-        elif self.mode == 'train' or (self.mode == 'validate' and not self.cfg.use_intent and target_pc is not None): 
-            if cross_object_pc is not None:
-                grasp_pc = torch.cat([target_pc, cross_object_pc], dim=1)
-            else:
-                grasp_pc = torch.cat([target_pc, object_pc], dim=1)
-            
-            grasp_emb = torch.cat([robot_embedding, object_embedding], dim=1)
-            latent = self.point_encoder(torch.cat([grasp_pc, grasp_emb], -1))
-            mu, logvar = self.latent_encoder(latent)
-            z_dist = torch.distributions.normal.Normal(mu, torch.exp(0.5 * logvar))
-            z = z_dist.rsample()  # (B, latent_dim)
-
-        else:
-            mu, logvar = None, None
-            z = torch.randn(robot_pc.shape[0], self.cfg.latent_dim).to(robot_pc.device)
-        
-        if self.cfg.use_intent:
-            intent_embedding = self.intent_embedding(intent).squeeze(1)  
-            z = torch.cat([z, intent_embedding], dim=-1)   # (B, latent_dim + intent_dim)
-
+        z = language_emb
+        mu, logvar = None, None
 
         z = z.unsqueeze(dim=1).repeat(1, robot_embedding.shape[1], 1)  # (B, N, latent_dim + intent_dim)
         
@@ -349,9 +317,6 @@ class Network_clip_dgcnn(nn.Module):
         transformer_object_outputs = self.transformer_object(object_embedding_z, robot_embedding_z)
         robot_embedding_tf = robot_embedding_z + transformer_robot_outputs["src_embedding"]
         object_embedding_tf = object_embedding_z + transformer_object_outputs["src_embedding"]
-
-        # Phi_A = torch.cat([robot_embedding_tf, z], dim=-1)  # (B, N, emb_dim + latent_dim + intent_dim)
-        # Phi_B = torch.cat([object_embedding_tf, z], dim=-1)  # (B, N, emb_dim + latent_dim + intent_dim)
 
         Phi_A = robot_embedding_tf
         Phi_B = object_embedding_tf
@@ -422,7 +387,6 @@ class Network_clip_dgcnn_add(nn.Module):
         self.cfg = cfg
         self.mode = mode
 
-        print('emb_dim:', cfg.emb_dim)
         self.encoder_robot = create_encoder_network(emb_dim=cfg.emb_dim, pretrain=cfg.pretrain)
         self.encoder_object = create_encoder_network(emb_dim=cfg.emb_dim)
 
@@ -503,8 +467,8 @@ class Network_clip_dgcnn_add(nn.Module):
         robot_embedding_tf = robot_embedding_z + transformer_robot_outputs["src_embedding"]
         object_embedding_tf = object_embedding_z + transformer_object_outputs["src_embedding"]
 
-        Phi_A = robot_embedding_tf
-        Phi_B = object_embedding_tf
+        Phi_A = robot_embedding_tf  # [(B, N, emb_dim)]
+        Phi_B = object_embedding_tf   # [(B, N, emb_dim)]
 
         # Compute D(R,O) matrix
         if self.cfg.block_computing:  # use matrix block computation to save GPU memory
@@ -536,6 +500,10 @@ class Network_clip_dgcnn_add(nn.Module):
                 .reshape(Phi_B.shape[0] * Phi_A.shape[1] * Phi_B.shape[1], Phi_B.shape[2])
             )
             dro = self.kernel(Phi_A_r, Phi_B_r).reshape(Phi_A.shape[0], Phi_A.shape[1], Phi_B.shape[1])
+        
+        # Use matrix multiplication to compute D(R,O) matrix
+        # dro = torch.bmm(Phi_A, Phi_B.transpose(1, 2))  # (B, N, N)
+
 
         outputs = {
             'dro': dro,
@@ -575,7 +543,7 @@ class Network_clip_dgcnn_add(nn.Module):
         return outputs
 
 
-def create_network_larger_transformer_clip_add_dgcnn_acc(cfg, mode):
+def create_network_larger_transformer_clip_add_dgcnn(cfg, mode):
     network = Network_clip_dgcnn_add(
         cfg=cfg,
         mode=mode
@@ -823,6 +791,8 @@ class Network_clip_add_dgcnn_acc(nn.Module):
                 .reshape(Phi_B.shape[0] * Phi_A.shape[1] * Phi_B.shape[1], Phi_B.shape[2])
             )
             dro = self.kernel(Phi_A_r, Phi_B_r).reshape(Phi_A.shape[0], Phi_A.shape[1], Phi_B.shape[1])
+
+
 
         outputs = {
             'dro': dro,

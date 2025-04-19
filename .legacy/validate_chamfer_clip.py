@@ -9,7 +9,7 @@ from utils.hand_model import create_hand_model
 from utils.multilateration import multilateration
 from utils.se3_transform import compute_link_pose
 from utils.optimization import *
-from model.network import create_network_larger_transformer_clip_dgcnn
+from model.network import create_network_larger_transformer_clip_add_dgcnn
 import hydra
 from tqdm import tqdm
 
@@ -45,12 +45,12 @@ def main(cfg):
     with open(log_file_name, 'a') as f:
         print(f"************************ Validating epoch {validate_epoch} ************************", file=f)
 
-    network = create_network_larger_transformer_clip_dgcnn(cfg.model, mode='validate').to(device)
+    network = create_network_larger_transformer_clip_add_dgcnn(cfg.model, mode='validate').to(device)
     network.load_state_dict(torch.load(f"output/{cfg.name}/state_dict/epoch_{validate_epoch}.pth", map_location=device), strict=False)
     network.eval()
 
-    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-03-16_23-38-46_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-20_23-53-15/res_diffuser_500.pkl"
-    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-03-16_23-38-46_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-04-06_20-47-05/res_diffuser_500.pkl"
+    result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-03-16_23-38-46_oakink_rotmat_custom_robot_pn2_object_pn2_new_spilt_short_sentence/eval/final_validate_data/2025-03-20_23-53-15/res_diffuser_500.pkl"
+    # result_path = "/data/zwq/code/Scene-Diffuser/outputs/2025-04-13_17-25-08_oakink_rotmat_custom_robot_pn2_object_pn2_three_split_ss_shadow/eval/final_validate_data/2025-04-14_20-23-14/res_diffuser_k3.pkl"
 
     results = load_results(result_path)['results']
     print(f"Loading results from: {result_path}")

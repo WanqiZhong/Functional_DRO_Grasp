@@ -85,15 +85,17 @@ def correct_shadowhand_wrist(robot_pose, wrj1_angle=0.0, wrj2_angle=0.0):
     return np.concatenate([corrected_position, quat, robot_pose[7:]])
 
 # Paths
-CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_bodex.pt'
-OUTPUT_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_dro.pt'
+# CONVERTED_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_bodex.pt'
+# OUTPUT_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_dataset_standard_all_retarget_to_shadowhand_valid_dro.pt'
+CONVERTED_DATASET_PATH = '/data/zwq/code/BODex/sim_shadow/fc/oakink_multi_teapot_step_0001_max/graspdata/combined_results.pt'
+OUTPUT_DATASET_PATH = '/data/zwq/code/DRO_Grasp/data/OakInkDataset/oakink_teapot_retarget_to_shadowhand_no_valid_dro.pt'
 
 # Load the dataset
 print(f"Loading dataset from {CONVERTED_DATASET_PATH}")
 converted_data = torch.load(CONVERTED_DATASET_PATH, map_location=torch.device('cpu'))
 converted_metadata = converted_data['metadata']
-format_data = converted_data['version']['format']
-assert format_data == 'bodex', "Only bodex format is supported"
+# format_data = converted_data['version']['format']
+# assert format_data == 'bodex', "Only bodex format is supported"
 
 # Create a new metadata list
 new_metadata = []
