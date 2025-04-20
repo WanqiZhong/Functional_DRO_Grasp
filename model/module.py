@@ -97,7 +97,7 @@ class TrainingModule(pl.LightningModule):
 
         mano_mask = [robot_name == 'mano' for robot_name in robot_names]
         mano_mask = torch.tensor(mano_mask)
-        cmap_mask = [object_name.split('+')[0] == 'cmap' for object_name in object_names]
+        cmap_mask = [robot_name != 'mano' for robot_name in robot_names]
         cmap_mask = torch.tensor(cmap_mask)
         retarget_mask = [object_name.split('+')[0] == 'oakink' for object_name in object_names]
         retarget_mask = torch.tensor(retarget_mask)
