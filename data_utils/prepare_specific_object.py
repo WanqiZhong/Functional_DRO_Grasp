@@ -2,10 +2,10 @@ import os
 import torch
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-save_name = "teapot"
+save_name = "small"
 robot_name = "shadowhand"
-# target_objects = ["oakink+teapot", "oakink+lotion_pump"]
-target_objects = ["oakink+teapot"]
+target_objects = ["oakink+teapot", "oakink+lotion_pump"]
+# target_objects = ["oakink+teapot"]
 
 dataset_path = os.path.join(
     ROOT_DIR, f'data/OakInkDataset/oakink_dataset_standard_all_retarget_to_{robot_name}_valid_dro_contact_map.pt'

@@ -3,7 +3,7 @@ robot_names:
   - 'shadowhand'
   # - 'allegro'
 
-debug_object_names: 'oakink+teapot'  # use part of the dataset, for debug only
+debug_object_names: null  # use part of the dataset, for debug only
 dataset_name: 'oakink'
 complex_language_type: 'clip_512'
 
