@@ -388,7 +388,7 @@ class Network_clip_dgcnn_add(nn.Module):
         self.mode = mode
 
         self.encoder_robot = create_encoder_network(emb_dim=cfg.emb_dim, pretrain=cfg.pretrain)
-        self.encoder_object = create_encoder_network(emb_dim=cfg.emb_dim)
+        self.encoder_object = create_encoder_network(emb_dim=cfg.emb_dim, pc_dim=cfg.pc_dim)
 
         self.transformer_robot = Transformer(emb_dim=cfg.emb_dim, ff_dims=2*(cfg.emb_dim), n_blocks=4)
         self.transformer_object = Transformer(emb_dim=cfg.emb_dim, ff_dims=2*(cfg.emb_dim), n_blocks=4)

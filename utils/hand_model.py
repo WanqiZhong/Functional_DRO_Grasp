@@ -145,6 +145,20 @@ class HandModel:
 
         sampled_pc = self.get_transformed_links_pc(q, self.vertices)
         return farthest_point_sampling(sampled_pc, num_points)
+    
+    def get_sampled_pc_fast(self, q=None, num_points=512):
+        """
+        :param q: (9 + DOF,), joint values (rot6d representation)
+        :param num_points: int, number of sampled points
+        :return: ((N, 3), list), sampled point cloud (numpy) & index
+        """
+        if q is None:
+            q = self.get_canonical_q()
+
+        sampled_pc = self.get_transformed_links_pc(q, self.vertices)
+        indices = torch.randperm(65536)[:num_points]
+        sampled_pc = sampled_pc[indices]
+        return sampled_pc
 
     def get_canonical_q(self):
         """ For visualization purposes only. """

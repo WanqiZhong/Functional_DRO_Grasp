@@ -110,26 +110,16 @@ class TrainingModule(pl.LightningModule):
 
         object_pc = batch['object_pc']
         dro_gt = batch['dro_gt']
-        
-        # language_embedding = batch['language_embedding']
-        language_embedding = batch['complex_language_embedding']
 
-        # Visualize
-        if visualize:
-            point_clouds = [robot_pc_initial[0]-robot_pc_initial[0].mean(dim=0, keepdim=True), object_pc[0]]
-            labels = ["Initial Robot Point Cloud", "Object Point Cloud"]
-            colors = ['r', 'g']
-            
-            visualize_point_clouds(
-                point_clouds=point_clouds,
-                labels=labels,
-                colors=colors,
-                title="Combined Point Clouds"
-            )
+        if 'contact_map' in batch and isinstance(batch['contact_map'], torch.Tensor):
+            contact_map = batch['contact_map'].unsqueeze(-1)
+            object_contact_pc = torch.cat((object_pc, contact_map), dim=-1)
+
+        language_embedding = batch['complex_language_embedding']
 
         network_output = self.network(
             robot_pc_initial,
-            object_pc,
+            object_contact_pc,
             target_pc = robot_pc_target,
             intent = intent,
             language_emb = language_embedding

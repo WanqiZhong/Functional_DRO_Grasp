@@ -15,9 +15,18 @@ from utils.hand_model import create_hand_model, HandModel
 robot_names = ['leaphand']
 object_names = [
     "oakink+teapot",
+    "oakink+lotion_pump",
+    "oakink+cylinder_bottle",
+    "oakink+mug",
+    "oakink+bowl",
+    "oakink+cup",
+    "oakink+knife",
+    "oakink+pen",
+    "oakink+bottle",
+    "oakink+headphones"
 ]
 
-dataset_path = os.path.join(ROOT_DIR, 'data', 'OakInkDataset', 'teapot_oakink_dataset_standard_all_retarget_to_leaphand.pt')  
+dataset_path = os.path.join(ROOT_DIR, 'data', 'OakInkDataset', 'oakink_dataset_standard_all_retarget_to_leaphand.pt')  
 point_cloud_dataset = torch.load(os.path.join(ROOT_DIR, 'data', 'OakInkDataset', 'oakink_object_pcs.pt'))
 metadata = torch.load(dataset_path, map_location=torch.device('cpu'))['metadata']
 

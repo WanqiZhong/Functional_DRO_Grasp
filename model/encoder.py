@@ -7,8 +7,8 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
 
-def create_encoder_network(emb_dim, pretrain=None, device=torch.device('cpu')) -> nn.Module:
-    encoder = Encoder(emb_dim=emb_dim)
+def create_encoder_network(emb_dim, pretrain=None, pc_dim=3, device=torch.device('cpu')) -> nn.Module:
+    encoder = Encoder(emb_dim=emb_dim, pc_dim=pc_dim)
     if pretrain is not None:
         print(f"******** Load embedding network pretrain from <{pretrain}> ********")
         encoder.load_state_dict(
@@ -71,11 +71,11 @@ class Encoder(nn.Module):
     Further explanation can be found in Appendix F.1 of https://arxiv.org/pdf/2410.01702.
     """
 
-    def __init__(self, emb_dim=512):
+    def __init__(self, emb_dim=512, pc_dim=3):
         super(Encoder, self).__init__()
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(6, 64, kernel_size=1, bias=False),
+            nn.Conv2d(pc_dim*2, 64, kernel_size=1, bias=False),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(negative_slope=0.2)
         )

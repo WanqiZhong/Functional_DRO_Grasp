@@ -1,0 +1,13 @@
+model:
+  emb_dim: 512
+  latent_dim: 512
+  pc_dim: 4
+
+  pretrain: pretrain_3robots.pth
+  obj_pretrain: null
+  train: model_3robots.pth
+
+  center_pc: True
+  block_computing: True
+  use_intent: False
+  use_language: True

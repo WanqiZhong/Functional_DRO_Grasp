@@ -183,7 +183,10 @@ def process_obj(obj_path, output_path, num_points, timeout, error_logger, info_l
             torch.save(object_pc_normals, output_path) 
             open3d_success = True
         else:
-            return sampled_points
+            return torch.cat([
+                torch.from_numpy(sampled_points).float(),
+                torch.from_numpy(sampled_normals).float()
+            ], dim=-1)
     except TimeoutException:
         open3d_error = "Open3D Timeout occurred."
     except ValueError as ve:
@@ -203,7 +206,10 @@ def process_obj(obj_path, output_path, num_points, timeout, error_logger, info_l
                 torch.save(object_pc_normals, output_path)  
                 trimesh_success = True
             else:
-                return sampled_points
+                return torch.cat([
+                    torch.from_numpy(sampled_points).float(),
+                    torch.from_numpy(sampled_normals).float()
+                ], dim=-1)
         except TimeoutException:
             trimesh_error = "Trimesh Timeout occurred."
         except ValueError as ve:
@@ -253,12 +259,12 @@ def generate_object_pc(args):
 
                 if not args.package_obj:
                     if os.path.exists(output_path):
-                        # print(f"{output_path} already exists, skipping.")
+                        print(f"{output_path} already exists, skipping.")
                         continue
                     process_obj(obj_path, output_path, args.num_points, args.timeout, error_logger, info_logger, args.package_obj)
                 else:
                     sampled_points = process_obj(obj_path, output_path, args.num_points, args.timeout, error_logger, info_logger, args.package_obj)
-                    obj_pcs[obj_base_name] = torch.from_numpy(np.array(sampled_points).astype(np.float32)).float()
+                    obj_pcs[obj_base_name] = sampled_points.float()
 
         if args.package_obj:
             output_dir = os.path.join(ROOT_DIR, args.package_save_path)
@@ -341,12 +347,23 @@ if __name__ == '__main__':
     parser.add_argument('--object_name', default='oakink', type=str)
     parser.add_argument('--timeout', default=20, type=int)
     parser.add_argument('--package_obj', action='store_true', help='Output all object point cloud in a single file')
-    parser.add_argument('--package_save_path', default='data/OakInkDataset/oakink_object_pcs.pt', type=str)
+    parser.add_argument('--package_save_path', default='data/OakInkDataset/oakink_object_pcs_with_normals.pt', type=str)
     args = parser.parse_args()
 
     if args.type == 'robot':
         generate_robot_pc(args)
     elif args.type == 'object':
+        # Security check
+        # if not use package, the num points should be 512
+        assert args.num_points == 512 or args.package_obj, "num_points should be 512 if not using package"
+        # if use package, the num points should be 65536
+        assert args.num_points == 65536 or not args.package_obj, "num_points should be 65536 if using package"
+        print(f"num_points: {args.num_points}, package_obj: {args.package_obj}")
+        # Get input to continue (y/n)
+        check = input("Do you want to continue? (y/n): ")
+        if check.lower() != 'y':
+            print("Exiting...")
+            exit(0)
         generate_object_pc(args)
     else:
         raise NotImplementedError

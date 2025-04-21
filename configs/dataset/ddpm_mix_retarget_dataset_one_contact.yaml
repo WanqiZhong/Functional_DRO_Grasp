@@ -1,0 +1,19 @@
+robot_names:
+  # - 'retarget_leaphand'
+  - 'shadowhand'
+  # - 'allegro'
+
+debug_object_names: 'oakink+teapot'  # use part of the dataset, for debug only
+dataset_name: 'oakink'
+complex_language_type: 'clip_512'
+
+batch_size: 48
+num_workers: 16
+object_pc_type: 'random'  # 'fixed', 'random', 'partial'
+use_valid_data: true
+use_contact_data: true
+
+ratio:
+  # retarget_leaphand: 4
+  shadowhand: 5
+  # allegro: 4
