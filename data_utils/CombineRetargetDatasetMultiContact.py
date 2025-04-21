@@ -184,7 +184,7 @@ class CombineDataset(Dataset):
         use_small_data: bool = True, # for quicker debug, reduce the dataloading time
         contact_type: str = 'important',
         ddpm_contact_type: str = 'random',
-        small_data_name: str = 'teapot',
+        small_data_name: str = 'small',
     ):
         self.batch_size = batch_size
         self.robot_names = robot_names if robot_names is not None else ['barrett', 'allegro', 'shadowhand']
