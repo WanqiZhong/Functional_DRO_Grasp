@@ -462,10 +462,10 @@ class CombineDataset(Dataset):
             dro_gt_batch = torch.stack(dro_gt_batch)
         
         intent_batch = torch.tensor(intent_batch, dtype=torch.int).reshape(-1, 1)
-        object_pc_batch = torch.stack(object_pc_batch)
-        object_pc_ddpm_batch = torch.stack(object_pc_ddpm_batch)
         language_embedding_batch = torch.stack(language_embedding_batch)
         robot_pc_initial_batch = torch.stack(robot_pc_initial_batch)
+        object_pc_ddpm_batch = torch.stack(object_pc_ddpm_batch)
+        object_pc_batch = torch.stack(object_pc_batch) if self.provide_pc else None
 
         if len(complex_language_embedding_batch) == len(batch_robot_data):
             complex_language_embedding_batch = torch.stack(complex_language_embedding_batch)
@@ -481,10 +481,10 @@ class CombineDataset(Dataset):
         B = len(batch_robot_data)
         N = self.num_points
 
-        assert robot_pc_initial_batch.shape == (B, 512, 3),\
-            f"Expected: {(B, 512, 3)}, Actual: {robot_pc_initial_batch.shape}"
-        assert robot_pc_target_batch.shape == (B, 512, 3),\
-            f"Expected: {(B, 512, 3)}, Actual: {robot_pc_target_batch.shape}"
+        # assert robot_pc_initial_batch.shape == (B, 512, 3),\
+            # f"Expected: {(B, 512, 3)}, Actual: {robot_pc_initial_batch.shape}"
+        # assert robot_pc_target_batch.shape == (B, 512, 3),\
+            # f"Expected: {(B, 512, 3)}, Actual: {robot_pc_target_batch.shape}"
         # assert object_pc_ddpm.shape == (B, 2048, 3),\
         #     f"Expected: {(B, 2048, 3)}, Actual: {object_pc_ddpm_batch.shape}"
         # assert object_pc.shape == (B, N, 3),\
@@ -504,7 +504,7 @@ class CombineDataset(Dataset):
             'robot_pc_target': robot_pc_target_batch,
             'language_embedding': language_embedding_batch,
             'object_pc': object_pc_batch,
-            'object_pc_512': object_pc_ddpm_batch,
+            'object_pc_ddpm': object_pc_ddpm_batch,
             'dro_gt': dro_gt_batch,
             'initial_q': initial_q_batch,
             'target_q': target_q_batch,
